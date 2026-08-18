@@ -4,7 +4,6 @@ from pathlib import Path
 from charts import (
     allocation_chart,
     capital_chart,
-    fee_rate_chart,
     sensitivity_chart,
     shock_chart,
     show as show_chart,
@@ -437,17 +436,17 @@ def render_phase1_charts(rates: dict, results: dict, client_view: bool):
 
 
 def render_projection_charts(snapshot: dict, client_view: bool):
-    """The projection charts: a 2×2 grid, then the market-shock explorer.
+    """The projection charts: two side by side, the capital bridge, then the
+    market-shock explorer.
 
-    Row 1 is the path (capital over time, yearly split); row 2 is the
-    end-state (capital bridge) and the pricing (effective fee rate). The
-    shock explorer sits full width beneath: it is the only what-if view, and
-    its slider needs the horizontal room. Columns stack on a phone.
+    Columns stack on a phone. The bridge is half width on desktop -- with
+    only three or four bars a full-width waterfall spreads them too far
+    apart to read as one bridge. The shock explorer sits full width beneath:
+    it is the only what-if view, and its slider needs the room.
     """
     rows = snapshot["projection_rows"]
     # Snapshots stored before the grid parameters were kept lack this key;
-    # the charts that need it degrade (fee chart infers the split, shock
-    # chart is skipped) rather than raise.
+    # the shock chart is skipped rather than raising.
     plan = snapshot.get("yearly_params")
 
     left, right = st.columns(2)
@@ -464,19 +463,13 @@ def render_projection_charts(snapshot: dict, client_view: bool):
         )
         show_chart(yearly_split_chart(rows, client_view))
 
-    left, right = st.columns(2)
-    with left:
+    bridge, _ = st.columns(2)
+    with bridge:
         st.markdown(
             "**From starting capital to final value**" if client_view
             else "**Capital bridge: start to final**"
         )
         show_chart(waterfall_chart(rows, client_view))
-    with right:
-        st.markdown(
-            "**Fee as a share of each year's gross gain**" if client_view
-            else "**Effective fee rate vs headline split**"
-        )
-        show_chart(fee_rate_chart(rows, plan, client_view))
 
     if plan:
         st.markdown(
