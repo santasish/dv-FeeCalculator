@@ -49,10 +49,11 @@ Tested against Python 3.14, Streamlit 1.61.1, pandas 3.0.5.
 |---|---|
 | `engine.py` | All calculation logic. **No Streamlit import** — importable and testable on its own. |
 | `app.py` | Everything UI: views, renderers, the projection grid, the input formatter. |
+| `charts.py` | The Altair charts (Phase 1 allocation and yield charts, Phase 2 capital and profit-split charts), built from the engine's own result dicts. |
 | `test_engine.py` | 38 tests covering the maths and its edge cases. |
 | `assets/` | Datavynx brand marks used by the app and this README. |
 | `.streamlit/config.toml` | Brand theme (navy text, gold accent). |
-| `requirements.txt` | `streamlit`, `pandas`, `pytest`. |
+| `requirements.txt` | `streamlit`, `altair`, `pandas`, `pytest`. |
 
 The split exists so the maths can be exercised directly:
 
@@ -267,6 +268,46 @@ shares swapped) were all caught.
 
 ---
 
+## Charts
+
+Every results section pairs its numbers with a chart, drawn from the same
+result dict / projection rows as the table beside it so the two can never
+disagree. Altair is used because it ships with Streamlit (no extra
+dependency), follows the Streamlit theme, and has no pan/zoom by default —
+so swiping across a chart on a phone scrolls the page instead of the chart.
+
+| Where | Internal view | Client view |
+|---|---|---|
+| Phase 1 | **Where the gross profit goes** — one stacked bar: hurdle → client · client share · house share | Net gain · performance fee |
+| Phase 1 | **Yields vs hurdle** — gross return, client yield and house yield as bars against a dashed hurdle line | Gross return and net yield only |
+| Phase 2 | **Client capital over 5 years** — line with the start/end values labelled and payout years marked | Same, worded as "portfolio value" / "withdrawn" |
+| Phase 2 | **Yearly profit split** — client return + house earnings per year, with the cumulative CLTV line over the top | Net gain + performance fee (fee floored to zero, as in the table); no CLTV |
+
+Phase 2 charts sit in a **Charts / Table** tab pair so the wide table is one
+tap away rather than the first thing a phone shows. Chart pairs use
+`st.columns(2)`, which Streamlit stacks automatically below ~640 px.
+
+Mobile-first details worth keeping when editing `charts.py`:
+
+- Rupee axes are scaled to one unit (₹ Lakh / ₹ Crore) picked from the data;
+  raw `1,00,00,000` ticks do not fit a phone-width axis.
+- Values that matter are direct-labelled (`₹12.5L`), because touch has no
+  hover. Tooltips stay on as a bonus.
+- Legends are on top, horizontal.
+- Colour follows the entity: client money blue, house money / fee gold, hurdle
+  teal, gross/reference grey. Loss years draw below or left of zero rather than
+  switching chart type; below the hurdle, the allocation bar gives way to plain
+  component bars because "gross = whole bar" no longer holds.
+- Client-view charts are separate code paths that only ever receive client
+  quantities — house earnings, house yield and CLTV cannot leak into them.
+
+The three series colours were validated together as a colourblind-safe set
+against the white surface; brand navy itself is too dark and too grey to
+work as a bar fill, so the client series uses the nearest in-band navy-blue
+(`#2a66b3`) while the house series is the exact brand gold.
+
+---
+
 ## Branding
 
 | Token | Value | Use |
@@ -311,6 +352,5 @@ Colours are defined once as `BRAND_*` constants at the top of `app.py` and in
   `ROUND_HALF_UP`.
 - **No scenario persistence.** Everything is lost on refresh; there is no way
   to save or compare scenarios.
-- **No charts** — the projection is table-only.
 - **Invalid values in the grid** rely on the editor's own `min`/`max`
   constraints; there is no separate validation pass over grid contents.

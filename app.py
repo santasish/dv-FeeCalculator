@@ -1,6 +1,13 @@
 import json
 from pathlib import Path
 
+from charts import (
+    allocation_chart,
+    capital_chart,
+    show as show_chart,
+    yearly_split_chart,
+    yield_chart,
+)
 from engine import (
     calculate_single_year,
     format_inr,
@@ -369,6 +376,46 @@ def enable_live_number_formatting(
         components.html(html, height=0)
 
 
+def render_phase1_charts(rates: dict, results: dict, client_view: bool):
+    """The two single-year charts, side by side on desktop, stacked on a phone.
+
+    Left: how the gross profit is carved up. Right: gross return and yields
+    against the hurdle line. Both are drawn from the same result dict as the
+    metrics above them, so they cannot disagree with the numbers.
+    """
+    left, right = st.columns(2)
+    with left:
+        st.markdown(
+            "**Where the gross gain goes**" if client_view
+            else "**Where the gross profit goes**"
+        )
+        chart = allocation_chart(results, client_view)
+        if chart is not None:
+            show_chart(chart)
+        else:
+            st.caption("No profit to allocate this year.")
+    with right:
+        st.markdown("**Yields vs hurdle**")
+        show_chart(yield_chart(rates, results, client_view))
+
+
+def render_projection_charts(rows: list, client_view: bool):
+    """The two projection charts, side by side on desktop, stacked on a phone."""
+    left, right = st.columns(2)
+    with left:
+        st.markdown(
+            "**Your portfolio value over 5 years**" if client_view
+            else "**Client capital over 5 years**"
+        )
+        show_chart(capital_chart(rows, client_view))
+    with right:
+        st.markdown(
+            "**Yearly net gain and fee**" if client_view
+            else "**Yearly profit split and cumulative CLTV**"
+        )
+        show_chart(yearly_split_chart(rows, client_view))
+
+
 def render_phase1(snapshot: dict):
     """Renders the Phase 1 single-year results from a stored snapshot."""
     rates = snapshot["rates"]
@@ -383,6 +430,8 @@ def render_phase1(snapshot: dict):
     with col2:
         st.metric("Total Fund House Earnings", format_inr(results['total_fund_house_earnings']))
         st.metric("Final Fund House Yield", f"{results['final_fund_house_yield']:,.2f}%")
+
+    render_phase1_charts(rates, results, client_view=False)
 
     capital_employed = rates["capital"]
     hurdle_rate = rates["hurdle_rate"]
@@ -465,6 +514,12 @@ def render_projection(snapshot: dict):
     if total_payouts > 0:
         st.caption(f"Total payouts taken across the 5 years: {format_inr(total_payouts)}")
 
+    # Charts first, table one tap away: on a phone the wide table is a long
+    # horizontal scroll, so it should not be what greets the reader.
+    charts_tab, table_tab = st.tabs(["Charts", "Table"])
+    with charts_tab:
+        render_projection_charts(rows, client_view=False)
+
     # A totals row for the flow columns only -- point-in-time
     # columns (capital, yields) have no meaningful 5-year sum
     # and are left blank.
@@ -512,14 +567,14 @@ def render_projection(snapshot: dict):
             **{"background-color": "rgba(10, 20, 36, 0.06)"},
         )
     )
-    st.dataframe(styled)
-
-    st.download_button(
-        "Download 5-Year Projection (CSV)",
-        data=df.reset_index(names="Year").to_csv(index=False).encode("utf-8"),
-        file_name="5_year_projection.csv",
-        mime="text/csv",
-    )
+    with table_tab:
+        st.dataframe(styled)
+        st.download_button(
+            "Download 5-Year Projection (CSV)",
+            data=df.reset_index(names="Year").to_csv(index=False).encode("utf-8"),
+            file_name="5_year_projection.csv",
+            mime="text/csv",
+        )
 
 
 # Internal column -> client-facing column. Anything absent is withheld:
@@ -570,6 +625,8 @@ def render_phase1_client(snapshot: dict):
             "No performance fee applies this year because the return did not clear "
             "the hurdle rate."
         )
+
+    render_phase1_charts(snapshot["rates"], results, client_view=True)
 
     with st.expander("How your return is calculated"):
         st.markdown(f"""
@@ -624,6 +681,10 @@ def render_projection_client(snapshot: dict):
     if total_withdrawn > 0:
         st.caption(f"Total withdrawn across the 5 years: {format_inr(total_withdrawn)}")
 
+    charts_tab, table_tab = st.tabs(["Charts", "Table"])
+    with charts_tab:
+        render_projection_charts(rows, client_view=True)
+
     fee_waived_years = [
         year for year, value in df["House Earnings"].items() if value <= 0
     ]
@@ -669,30 +730,33 @@ def render_projection_client(snapshot: dict):
             **{"background-color": "rgba(10, 20, 36, 0.06)"},
         )
     )
-    st.dataframe(styled)
+    with table_tab:
+        st.dataframe(styled)
+
+        # Built from the client frame so internal columns cannot leak via
+        # export, and the fee is floored to match what the table shows --
+        # otherwise the CSV would report a negative fee for a year displayed
+        # as "No fee".
+        export_df = client_df.copy()
+        export_df["Performance Fee"] = export_df["Performance Fee"].clip(lower=0)
+        export_df = export_df.reset_index(names="Year")
+        st.download_button(
+            "Download Your Projection (CSV)",
+            data=export_df.to_csv(index=False).encode("utf-8"),
+            file_name="your_5_year_projection.csv",
+            mime="text/csv",
+        )
 
     if fee_waived_years:
-        # Without this, a waived fee makes Net Gain look larger than Gross
-        # Gain with no visible explanation.
+        # Outside the tabs so it is read alongside the charts as well as the
+        # table: without it, a waived fee makes Net Gain look larger than
+        # Gross Gain with no visible explanation.
         st.caption(
             f"No performance fee was charged in {', '.join(fee_waived_years)} "
             "because the return did not clear the hurdle rate. In those years the "
             "shortfall against the hurdle is absorbed rather than passed on, so the "
             "net gain can exceed the gross gain."
         )
-
-    # Built from the client frame so internal columns cannot leak via export,
-    # and the fee is floored to match what the table shows -- otherwise the
-    # CSV would report a negative fee for a year displayed as "No fee".
-    export_df = client_df.copy()
-    export_df["Performance Fee"] = export_df["Performance Fee"].clip(lower=0)
-    export_df = export_df.reset_index(names="Year")
-    st.download_button(
-        "Download Your Projection (CSV)",
-        data=export_df.to_csv(index=False).encode("utf-8"),
-        file_name="your_5_year_projection.csv",
-        mime="text/csv",
-    )
 
     st.caption(PROJECTION_DISCLAIMER)
 
