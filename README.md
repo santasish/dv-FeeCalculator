@@ -42,7 +42,7 @@ streamlit run app.py
 python -m pytest -q
 ```
 
-Tested against Python 3.14, Streamlit 1.61.1, pandas 3.0.5.
+Tested against Python 3.14, Streamlit 1.61.1, pandas 3.0.5, Altair 6.2.2.
 
 `.claude/launch.json` pins the dev server to port 8502.
 
@@ -305,6 +305,17 @@ comparison flipped, payout not deducted, house earnings compounding into
 client capital, hurdle dropped from the client return, wrong digit grouping,
 shares swapped) were all caught.
 
+**The tests cover `engine.py` only.** Charts and layout are not unit-tested —
+several of the bugs fixed in this file's history (bars overlapping under
+Streamlit's `autosize`, a hover layer resolving one series instead of two,
+chart pairs not stacking on an iPad) were invisible to pytest and only
+appeared in a browser. After changing `charts.py` or the layout, restart the
+dev server and check at the widths in the table under
+[Layout and responsiveness](#layout-and-responsiveness), in **both** views:
+no exception, no horizontal overflow, no clipped labels, complete legends,
+and the loss-year fallback branch. Values shown should be cross-checked
+against `engine.py` directly rather than trusted from the chart.
+
 ---
 
 ## Charts
@@ -326,28 +337,6 @@ so swiping across a chart on a phone scrolls the page instead of the chart.
 | Phase 2 | **Five-year allocation** — one stacked bar, the same hurdle → client / client share / house share carve-up as Phase 1's allocation chart but summed across the plan, with no time axis. It is the only view that separates the hurdle-guaranteed portion from the client's share of the upside at the aggregate level — the yearly-split chart lumps both into one "Client return" segment each year. If every year cleared its hurdle the bar is exact and stacked; if any year did not, a stacked carve-up would misstate that year, so it falls back to Phase 1's plain component bars (gross vs. client return vs. house earnings, net of the bad year). | "Net gain" / "Performance fee", same fallback |
 | Phase 2 | **The plan under a market shock** — a slider (rendered by Vega, no rerun) adds Δ points, −20 to +20, to *every year's* planned return; the client-capital path and the cumulative house earnings redraw instantly against dashed ghosts of the plan. Each Δ is a real run of `simulate_five_years` on the grid's own parameters, so Δ = 0 matches the table exactly. End labels state the difference vs plan; years the house earns nothing are tagged "no fee"; hover reads any year. Shows the asymmetry the hurdle creates: a −5 pt shock costs the client ~12 % of final capital but the house ~65 % of CLTV. | Portfolio line only, worded "If markets do better or worse than assumed" |
 
-Phase 2 charts sit in a **Charts / Table** tab pair so the wide table is one
-tap away rather than the first thing a phone shows. They are laid out as a
-2×2 grid — path (capital, yearly split) over end-state (bridge, five-year
-allocation) — with the shock explorer full width beneath, since it is the
-one what-if view and its slider needs the room. The allocation bar is drawn
-compact and centred by CSS in a bridge-height box (the `alloc_5yr` keyed
-container), so the row reads as a matched pair on desktop — and the
-min-height is dropped when the pair stacks, so a phone gets the bar at its
-natural height instead of a blank band around it. Sizing the Vega canvas
-itself to the bridge is the obvious alternative and is wrong: the canvas
-follows the chart everywhere, blank space included.
-
-Chart pairs use `st.columns(2)`. Streamlit only stacks columns below a
-640 px *viewport*, which left an iPad in portrait with the sidebar open
-(768 px viewport, ~430 px of content) drawing two 205 px charts — clipped
-labels, truncated legends, dropped axis ticks. `_BRAND_CSS` therefore adds
-a container query on the main block: any two-column block that holds a
-chart stacks when the *content area* is under 600 px. In practice: phone
-and iPad portrait stack; iPad landscape stacks while the sidebar is open
-and shows the 2×2 once it is collapsed; desktop is always 2×2. Metric
-pairs are excluded and stay side by side.
-
 An earlier version of the fourth chart was a per-year "effective fee rate vs
 headline split" — house earnings ÷ that year's gross, against the headline
 split. It required a paragraph of explanation to read (a ratio of a ratio)
@@ -355,7 +344,43 @@ and didn't earn that cost, so it was replaced 2026-08-18 with the five-year
 allocation bar above: the same idea, but concrete rupees instead of a
 derived percentage.
 
-Mobile-first details worth keeping when editing `charts.py`:
+### Layout and responsiveness
+
+Phase 2 charts sit in a **Charts / Table** tab pair so the wide table is one
+tap away rather than the first thing a phone shows. They are laid out as a
+2×2 grid — path (capital, yearly split) over end-state (bridge, five-year
+allocation) — with the shock explorer full width beneath, since it is the
+one what-if view and its slider needs the room.
+
+Chart pairs use `st.columns(2)`, but Streamlit only stacks columns below a
+640 px *viewport*. That left an iPad in portrait with the sidebar open
+(768 px viewport, ~430 px of content) drawing two 205 px charts — clipped
+labels, truncated legends, dropped axis ticks. `_BRAND_CSS` therefore adds a
+container query on the main block: any two-column block holding a chart
+stacks when the *content area* is under 600 px. Metric pairs are excluded
+and stay side by side. Verified:
+
+| Width | Chart pairs | Notes |
+|---|---|---|
+| Desktop 1280 | 2×2 | 397 px columns |
+| iPad landscape 1024, sidebar collapsed | 2×2 | 419 px columns |
+| iPad landscape 1024, sidebar open | stacked | only ~554 px of content |
+| iPad portrait 768 | stacked | metrics stay 2-up |
+| iPhone 375 | stacked | no horizontal overflow |
+
+**Place charts with CSS; size plot areas with Vega.** The five-year
+allocation bar is short and sits beside the much taller capital bridge. It is
+drawn compact (`_ALLOC_5YR_HEIGHT`) and centred by CSS in a bridge-height box
+(the `alloc_5yr` keyed container → `.st-key-alloc_5yr`), and that min-height
+is dropped inside the same container query that stacks the pair. Padding the
+Vega canvas to the bridge's height instead is the obvious alternative and is
+wrong: the canvas follows the chart everywhere, so the padding reappears as a
+blank band once the layout stacks on a phone. Note the bridge measures 307 px
+on the page despite `height=260` in its `.properties()` — legend and axis
+chrome — so match a neighbour by measuring it in the browser, not by reusing
+its Python constant.
+
+### Mobile-first details worth keeping when editing `charts.py`
 
 - Rupee axes are scaled to one unit (₹ Lakh / ₹ Crore) picked from the data;
   raw `1,00,00,000` ticks do not fit a phone-width axis.
@@ -368,15 +393,27 @@ Mobile-first details worth keeping when editing `charts.py`:
   plain component bars because there is nothing being carved up.
 - Client-view charts are separate code paths that only ever receive client
   quantities — house earnings, house yield and CLTV cannot leak into them.
-- The shock explorer's slider is a Vega `binding_range` param: every
-  scenario is precomputed in Python and the slider only filters, so dragging
-  it never triggers a Streamlit rerun and it works with a thumb. Its label
-  and range input are styled by the `.vega-bindings` rules in `_BRAND_CSS`.
+
+### Streamlit and Vega gotchas
+
 - `show()` sets a spec-level `autosize: fit-x`. Streamlit's Vega theme uses
   `fit`, under which a chart's `height` is the budget for the *whole* figure
   and the axes eat into the plot — a three-bar chart ends up with its bars
-  overlapping. With `fit-x`, `height` means the plot area, as it does
-  offline.
+  overlapping. With `fit-x`, `height` means the plot area, as it does offline.
+  Rendering a spec to PNG offline will *not* reproduce this: vl-convert pads
+  instead, so the bug only appears in the browser.
+- The shock explorer's slider is a Vega `binding_range` param: every scenario
+  is precomputed in Python and the slider only filters, so dragging it never
+  triggers a Streamlit rerun and it works with a thumb. Its label and range
+  input are styled by the `.vega-bindings` rules in `_BRAND_CSS`.
+- A hover layer built from an invisible `mark_rule` over long-format data
+  stacks one rule per series at each x, so the tooltip can only ever show one
+  of them. The sensitivity and shock charts instead use a nearest-x
+  `selection_point` over a wide (one row per x) frame, which resolves every
+  series from a single hit.
+- Streamlit's file watcher does not reliably pick up edits to `charts.py` in
+  this folder — restart the dev server after editing a module, or you will
+  verify the previous spec.
 
 The three series colours were validated together as a colourblind-safe set
 against the white surface; brand navy itself is too dark and too grey to
