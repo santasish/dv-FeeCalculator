@@ -285,6 +285,17 @@ on. It is never used as a background fill.
 | `assets/datavynx-logo.png` | Sidebar mark (`st.logo`) and this README's header |
 | `assets/datavynx-icon.png` | Browser favicon, and the sidebar mark when collapsed |
 | `assets/datavynx-logo-transparent.png` | Spare, for light or coloured backgrounds |
+| `assets/social-preview.png` | GitHub social preview card, 1280×640 |
+
+GitHub's social preview is a **repository setting, not a file** — there is no
+REST or GraphQL write path for it (`openGraphImageUrl` is read-only), so it
+cannot be set from code. Upload it by hand once:
+
+> **Settings → General → Social preview → Edit → Upload an image**, choosing
+> `assets/social-preview.png`.
+
+It is sized to GitHub's recommended 1280×640 so the card is not letterboxed;
+the raw logo is 4:1 and would be cropped.
 
 Colours are defined once as `BRAND_*` constants at the top of `app.py` and in
 `.streamlit/config.toml`; change them in those two places rather than inline.
