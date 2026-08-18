@@ -194,8 +194,15 @@ def allocation_chart(results: dict, client_view: bool) -> alt.LayerChart | None:
     )
 
 
-def _components_chart(results: dict, client_view: bool) -> alt.LayerChart:
-    """At/below-hurdle fallback: gross vs what each side ends up with."""
+def _components_chart(
+    results: dict, client_view: bool, height=None, bar_height=16,
+) -> alt.LayerChart:
+    """At/below-hurdle fallback: gross vs what each side ends up with.
+
+    ``height``/``bar_height`` default to the compact single-year size; the
+    5-year allocation chart's fallback branch passes larger values so it
+    fills the same canvas its stacked-bar sibling does.
+    """
     c = _colors()
     fee = results["total_fund_house_earnings"]
     if client_view:
@@ -219,7 +226,7 @@ def _components_chart(results: dict, client_view: bool) -> alt.LayerChart:
         df.loc[df["Metric"] == "Performance fee", ["Label", "Full"]] = "No fee"
     return _horizontal_bars(
         df, order=[m for m, _, _ in rows], colors=[col for _, _, col in rows],
-        value_field="Amount", axis=None, palette=c,
+        value_field="Amount", axis=None, palette=c, height=height, bar_height=bar_height,
     )
 
 
@@ -251,11 +258,13 @@ def yield_chart(rates: dict, results: dict, client_view: bool) -> alt.LayerChart
 
 
 def _horizontal_bars(df, order, colors, value_field, axis, palette,
-                     threshold=None) -> alt.LayerChart:
+                     threshold=None, height=None, bar_height=16) -> alt.LayerChart:
     """Thin horizontal bars with end labels; optional dashed threshold rule.
 
     Negatives extend left of zero and are labelled on their left end. The x
     domain always includes zero and the threshold, padded so labels fit.
+    ``height`` overrides the default compact sizing (a taller canvas spreads
+    the bars' band scale out rather than stacking them tight at the top).
     """
     ink = palette["ink"]
     values = list(df[value_field]) + ([threshold[0]] if threshold else [])
@@ -264,7 +273,7 @@ def _horizontal_bars(df, order, colors, value_field, axis, palette,
     domain = [lo - (0.28 * span if lo < 0 else 0), hi + 0.28 * span]
 
     base = alt.Chart(df)
-    bars = base.mark_bar(height=16, cornerRadiusEnd=3).encode(
+    bars = base.mark_bar(height=bar_height, cornerRadiusEnd=3).encode(
         y=alt.Y("Metric:N", sort=order, axis=alt.Axis(title=None, labelFontSize=12)),
         x=alt.X(
             f"{value_field}:Q",
@@ -308,7 +317,8 @@ def _horizontal_bars(df, order, colors, value_field, axis, palette,
         ).encode(x="x:Q", y=alt.value(0), text="label:N")
         layers += [rule, rule_label]
 
-    height = 30 * len(order) + (28 if threshold else 8)
+    if height is None:
+        height = 30 * len(order) + (28 if threshold else 8)
     # The threshold label is the topmost mark; Vega's estimate of its bounds
     # runs a pixel or two short, so give it headroom rather than a shaved top.
     return alt.layer(*layers).properties(
@@ -724,6 +734,10 @@ def waterfall_chart(rows: list, client_view: bool) -> alt.LayerChart:
     return alt.layer(bars, connectors, labels).properties(height=260)
 
 
+# Matches waterfall_chart's height: the two sit side by side in the grid.
+_ALLOC_5YR_HEIGHT = 260
+
+
 def allocation_5yr_chart(rows: list, client_view: bool) -> alt.LayerChart | None:
     """One horizontal stacked bar: how the whole five-year gross profit is
     carved up. The single-year twin of ``allocation_chart``, but summed
@@ -742,6 +756,12 @@ def allocation_5yr_chart(rows: list, client_view: bool) -> alt.LayerChart | None
     so a 3-way carve-up bar would misstate it -- the chart falls back to
     the same plain component bars Phase 1 uses for a single such year,
     applied to the 5-year totals net of the bad year.
+
+    Both branches fill a canvas matched to the capital bridge beside them in
+    the grid (``_ALLOC_5YR_HEIGHT``) and centre their content vertically --
+    Phase 1's version of this chart is a thin ribbon under its own metrics,
+    but pinned to the top of a much taller grid cell it read as a stray
+    sliver rather than a chart the bridge sits beside.
     """
     c = _colors()
     total_gross = round(sum(float(r["Gross Profit"]) for r in rows), 2)
@@ -754,7 +774,7 @@ def allocation_5yr_chart(rows: list, client_view: bool) -> alt.LayerChart | None
             "gross_profit": total_gross,
             "total_client_return": total_client_return,
             "total_fund_house_earnings": total_house,
-        }, client_view)
+        }, client_view, height=_ALLOC_5YR_HEIGHT, bar_height=36)
 
     if client_view:
         segments = [
@@ -790,12 +810,15 @@ def allocation_5yr_chart(rows: list, client_view: bool) -> alt.LayerChart | None
         start += value
     df = pd.DataFrame(rows_)
 
+    bar_thickness = 80
+    center_y = _ALLOC_5YR_HEIGHT / 2
     base = alt.Chart(df)
     bars = base.mark_bar(
-        height=56, cornerRadius=4, stroke=c["surface"], strokeWidth=2,
+        height=bar_thickness, cornerRadius=4, stroke=c["surface"], strokeWidth=2,
     ).encode(
         x=alt.X("x0:Q", axis=None, scale=alt.Scale(domain=[0, total], nice=False)),
         x2="x1:Q",
+        y=alt.value(center_y),
         color=alt.Color(
             "Segment:N",
             scale=alt.Scale(domain=[s[0] for s in segments], range=[s[2] for s in segments]),
@@ -808,16 +831,25 @@ def allocation_5yr_chart(rows: list, client_view: bool) -> alt.LayerChart | None
         ],
     )
     labels = base.transform_filter(alt.datum.show_label).mark_text(
-        fontSize=14, fontWeight="bold",
+        fontSize=15, fontWeight="bold",
     ).encode(
-        x=alt.X("mid:Q"), text="Label:N",
+        x=alt.X("mid:Q"), y=alt.value(center_y), text="Label:N",
         color=alt.Color("label_ink:N", scale=None, legend=None),
+    )
+    total_label = alt.Chart(pd.DataFrame({
+        "x": [total / 2], "t": [f"Total {fmt_short(total)}"],
+    })).mark_text(
+        baseline="bottom", fontSize=12, fontWeight="bold", color=c["ink"],
+    ).encode(
+        x=alt.X("x:Q", scale=alt.Scale(domain=[0, total], nice=False)),
+        y=alt.value(center_y - bar_thickness / 2 - 14),
+        text="t:N",
     )
 
     return (
-        alt.layer(bars, labels)
+        alt.layer(bars, labels, total_label)
         .resolve_scale(color="independent")
-        .properties(height=56)
+        .properties(height=_ALLOC_5YR_HEIGHT)
     )
 
 
