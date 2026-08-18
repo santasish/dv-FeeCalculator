@@ -8,6 +8,7 @@
   <img src="https://img.shields.io/badge/tests-38%20passing-CBA135?style=flat-square" alt="tests">
   <img src="https://img.shields.io/badge/python-3.14-0A1424?style=flat-square" alt="python">
   <img src="https://img.shields.io/badge/streamlit-1.61-0A1424?style=flat-square" alt="streamlit">
+  <img src="https://img.shields.io/badge/charts-6%20Altair-CBA135?style=flat-square" alt="charts">
   <img src="https://img.shields.io/badge/internal%20use-only-C0392B?style=flat-square" alt="internal use only">
 </p>
 
@@ -17,6 +18,9 @@ hurdle-rate-plus-profit-share arrangement.
 - **Phase 1** — single-year calculation with a full formula audit trail.
 - **Phase 2** — five-year compounding projection with per-year rate overrides,
   payouts, and a Client Lifetime Value figure.
+- **Charts** — six Altair charts alongside the tables (profit allocation,
+  yields vs hurdle, sensitivity, capital over time, yearly split with CLTV,
+  capital waterfall), sized to read on a phone as well as a desktop.
 - **Client view** — a toggle that presents the same numbers from the client's
   side, withholding fund house earnings, house yield and CLTV.
 
@@ -329,6 +333,7 @@ on. It is never used as a background fill.
 | `assets/datavynx-icon.png` | Browser favicon, and the sidebar mark when collapsed |
 | `assets/datavynx-logo-transparent.png` | Spare, for light or coloured backgrounds |
 | `assets/social-preview.png` | GitHub social preview card, 1280×640 |
+| `assets/make_social_preview.py` | Regenerates the card (`python assets/make_social_preview.py`); edit its `TAGLINE` when the feature list changes, then re-upload |
 
 GitHub's social preview is a **repository setting, not a file** — there is no
 REST or GraphQL write path for it (`openGraphImageUrl` is read-only), so it
