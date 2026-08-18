@@ -28,7 +28,7 @@ import pandas as pd
 # pyrefly: ignore [missing-import]
 import streamlit as st
 
-from engine import format_inr
+from engine import calculate_single_year, format_inr
 
 # Series colours, keyed to the Datavynx brand (navy primary, gold emphasis,
 # fixed light surface -- see .streamlit/config.toml). Brand navy itself is
@@ -459,3 +459,187 @@ def yearly_split_chart(rows: list, client_view: bool) -> alt.LayerChart:
         layers += [cum_line, cum_dots, cum_halo, cum_label]
 
     return alt.layer(*layers).properties(height=280)
+
+
+def sensitivity_chart(rates: dict) -> alt.LayerChart:
+    """Internal only: client return and house earnings as the return varies.
+
+    Sweeps the annual return across a range around the current inputs with
+    everything else held fixed. Both lines are straight (the engine applies the
+    same split to a shortfall as to a surplus, so the house absorbs its share of
+    a below-hurdle year), which makes the point of the chart the crossings:
+    house earnings pass through zero exactly at the hurdle, and the client's
+    break-even return sits left of it. The current year is marked on both
+    lines. Never shown in Client view (it draws house earnings).
+    """
+    c = _colors()
+    capital = float(rates["capital"])
+    hurdle = float(rates["hurdle_rate"])
+    current = float(rates["annual_return"])
+    lo = min(-10.0, current - 10.0, hurdle - 10.0)
+    hi = max(30.0, current + 10.0, hurdle + 10.0)
+    steps = int(round((hi - lo) / 0.5)) + 1
+    returns = [round(lo + i * 0.5, 2) for i in range(steps)]
+    if current not in returns:
+        returns.append(current)
+        returns.sort()
+
+    long_rows = []
+    for r in returns:
+        res = calculate_single_year(
+            capital, hurdle, rates["client_split"], rates["fund_house_split"], r,
+        )
+        for series, amount in (
+            ("Client return", res["total_client_return"]),
+            ("House earnings", res["total_fund_house_earnings"]),
+        ):
+            long_rows.append({"Return": r, "Series": series, "Amount": amount})
+    divisor, unit_title = pick_unit(x["Amount"] for x in long_rows)
+    for x_ in long_rows:
+        x_["Value"] = x_["Amount"] / divisor
+        x_["Full"] = format_inr(x_["Amount"])
+        x_["Return label"] = f"{x_['Return']:,.2f}%"
+        x_["is_current"] = x_["Return"] == current
+    df = pd.DataFrame(long_rows)
+
+    x = alt.X(
+        "Return:Q",
+        scale=alt.Scale(domain=[lo, hi], nice=False),
+        axis=alt.Axis(title="Annual return", labelExpr="datum.label + '%'", tickCount=6),
+    )
+    y = alt.Y("Value:Q", axis=alt.Axis(title=unit_title, format=",.2~f"))
+    color = alt.Color(
+        "Series:N",
+        scale=alt.Scale(domain=["Client return", "House earnings"],
+                        range=[c["client"], c["house"]]),
+        legend=alt.Legend(
+            orient="top", direction="horizontal", title=None,
+            symbolType="stroke", symbolStrokeWidth=3, labelFontSize=12,
+        ),
+    )
+    base = alt.Chart(df)
+    lines = base.mark_line(strokeWidth=2).encode(x=x, y=y, color=color)
+    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
+        color=c["muted"], strokeWidth=1,
+    ).encode(y="y:Q")
+
+    hurdle_df = pd.DataFrame({"x": [hurdle], "label": [f"Hurdle {hurdle:,.2f}%"]})
+    hurdle_on_right = hurdle > (lo + hi) / 2
+    hurdle_rule = alt.Chart(hurdle_df).mark_rule(
+        color=c["ink"], strokeDash=[4, 3], strokeWidth=1.5,
+    ).encode(x="x:Q")
+    hurdle_label = alt.Chart(hurdle_df).mark_text(
+        align="right" if hurdle_on_right else "left",
+        dx=-4 if hurdle_on_right else 4, dy=-4, baseline="bottom",
+        color=c["ink"], fontSize=11,
+    ).encode(x="x:Q", y=alt.value(0), text="label:N")
+
+    # The current year: a ringed point on each line plus one label naming
+    # the return, so the reader can see where "now" sits on the curve.
+    now = base.transform_filter(alt.datum.is_current)
+    now_dots = now.mark_point(
+        filled=True, size=90, opacity=1, stroke=c["surface"], strokeWidth=2,
+    ).encode(
+        x=x, y=y, color=color,
+        tooltip=[
+            alt.Tooltip("Series:N"),
+            alt.Tooltip("Return label:N", title="Return"),
+            alt.Tooltip("Full:N", title="Amount"),
+        ],
+    )
+    now_on_right = current > (lo + hi) / 2
+    now_label = now.transform_filter(alt.datum.Series == "Client return").mark_text(
+        align="right" if now_on_right else "left",
+        dx=-10 if now_on_right else 10, color=c["ink"], fontSize=12, fontWeight="bold",
+    ).encode(x=x, y=y, text=alt.value(f"Now: {current:,.2f}%"))
+
+    # A wide invisible hit target so a tap anywhere near the x position
+    # brings up both values, instead of having to land on a 2px line.
+    hover = base.mark_rule(opacity=0).encode(
+        x=x,
+        tooltip=[
+            alt.Tooltip("Return label:N", title="Return"),
+            alt.Tooltip("Series:N"),
+            alt.Tooltip("Full:N", title="Amount"),
+        ],
+    )
+
+    return alt.layer(
+        zero, hurdle_rule, hurdle_label, lines, hover, now_dots, now_label,
+    ).properties(height=280)
+
+
+def waterfall_chart(rows: list, client_view: bool) -> alt.LayerChart:
+    """Start capital + net gains - withdrawals = final value, as floating bars.
+
+    House earnings never enter the client's capital (they come out of gross
+    profit before the client return is credited), so this bridge is exact:
+    it is the engine's year-by-year roll-over collapsed into one picture.
+    Shown in both views -- nothing here is house-side. The withdrawals bar is
+    dropped when there were none.
+    """
+    c = _colors()
+    start = float(rows[0]["Starting Capital"])
+    final = float(rows[-1]["Ending Capital"])
+    gains = round(sum(float(r["Total Client Return"]) for r in rows), 2)
+    payouts = round(sum(float(r["Payout Taken"]) for r in rows), 2)
+
+    steps = [{
+        "Step": "Start", "y0": 0.0, "y1": start, "Amount": start,
+        "color": c["client"], "Label": fmt_short(start), "kind": "total",
+    }]
+    running = start
+    steps.append({
+        "Step": "Net gains", "y0": running, "y1": running + gains, "Amount": gains,
+        "color": c["hurdle"] if gains >= 0 else "#c0392b",
+        "Label": ("+" if gains >= 0 else "") + fmt_short(gains), "kind": "delta",
+    })
+    running += gains
+    if payouts > 0:
+        steps.append({
+            "Step": "Withdrawn" if client_view else "Payouts",
+            "y0": running, "y1": running - payouts, "Amount": -payouts,
+            "color": c["muted"], "Label": "−" + fmt_short(payouts), "kind": "delta",
+        })
+        running -= payouts
+    steps.append({
+        "Step": "Final value", "y0": 0.0, "y1": final, "Amount": final,
+        "color": c["client"], "Label": fmt_short(final), "kind": "total",
+    })
+
+    divisor, unit_title = pick_unit([s["y0"] for s in steps] + [s["y1"] for s in steps])
+    for i, s in enumerate(steps):
+        s["v0"] = s["y0"] / divisor
+        s["v1"] = s["y1"] / divisor
+        s["top"] = max(s["v0"], s["v1"])
+        s["Full"] = format_inr(s["Amount"])
+        # Where the connector to the next bar sits: at this bar's end level.
+        s["Next"] = steps[i + 1]["Step"] if i + 1 < len(steps) else None
+        s["level"] = s["v1"] if s["kind"] == "delta" or i == 0 else None
+    df = pd.DataFrame(steps)
+    order = [s["Step"] for s in steps]
+
+    # Headroom above the tallest bar so its label cannot clip at the top.
+    top = max(s["top"] for s in steps)
+    low = min(0.0, min(min(s["v0"], s["v1"]) for s in steps))
+    x = alt.X("Step:N", sort=order, axis=alt.Axis(title=None, labelAngle=0, labelFontSize=12))
+    base = alt.Chart(df)
+    bars = base.mark_bar(size=48).encode(
+        x=x,
+        y=alt.Y(
+            "v0:Q",
+            scale=alt.Scale(domain=[low, top * 1.1 if top > 0 else 1], nice=False),
+            axis=alt.Axis(title=unit_title, format=",.2~f"),
+        ),
+        y2="v1:Q",
+        color=alt.Color("color:N", scale=None, legend=None),
+        tooltip=[alt.Tooltip("Step:N"), alt.Tooltip("Full:N", title="Amount")],
+    )
+    connectors = base.transform_filter("isValid(datum.Next) && isValid(datum.level)").mark_rule(
+        color=c["muted"], strokeWidth=1,
+    ).encode(x=alt.X("Step:N", sort=order), x2="Next:N", y="level:Q")
+    labels = base.mark_text(
+        dy=-8, color=c["ink"], fontSize=12, fontWeight="bold",
+    ).encode(x=x, y="top:Q", text="Label:N")
+
+    return alt.layer(bars, connectors, labels).properties(height=260)

@@ -4,7 +4,9 @@ from pathlib import Path
 from charts import (
     allocation_chart,
     capital_chart,
+    sensitivity_chart,
     show as show_chart,
+    waterfall_chart,
     yearly_split_chart,
     yield_chart,
 )
@@ -398,9 +400,22 @@ def render_phase1_charts(rates: dict, results: dict, client_view: bool):
         st.markdown("**Yields vs hurdle**")
         show_chart(yield_chart(rates, results, client_view))
 
+    if not client_view:
+        # Internal only: it plots house earnings. Full width, because the
+        # crossings it exists to show need the horizontal room.
+        st.markdown("**How the year changes with the return**")
+        st.caption(
+            "Everything else held fixed. House earnings cross zero exactly at "
+            "the hurdle; the client's break-even sits to the left of it."
+        )
+        show_chart(sensitivity_chart(rates))
+
 
 def render_projection_charts(rows: list, client_view: bool):
-    """The two projection charts, side by side on desktop, stacked on a phone."""
+    """The projection charts: two side by side, then the capital bridge.
+
+    Columns stack on a phone, so this reads as one column there.
+    """
     left, right = st.columns(2)
     with left:
         st.markdown(
@@ -414,6 +429,16 @@ def render_projection_charts(rows: list, client_view: bool):
             else "**Yearly profit split and cumulative CLTV**"
         )
         show_chart(yearly_split_chart(rows, client_view))
+
+    # Half width on desktop: with only three or four bars a full-width
+    # waterfall spreads them too far apart to read as one bridge.
+    bridge, _ = st.columns(2)
+    with bridge:
+        st.markdown(
+            "**From starting capital to final value**" if client_view
+            else "**Capital bridge: start to final**"
+        )
+        show_chart(waterfall_chart(rows, client_view))
 
 
 def render_phase1(snapshot: dict):

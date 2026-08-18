@@ -49,7 +49,7 @@ Tested against Python 3.14, Streamlit 1.61.1, pandas 3.0.5.
 |---|---|
 | `engine.py` | All calculation logic. **No Streamlit import** — importable and testable on its own. |
 | `app.py` | Everything UI: views, renderers, the projection grid, the input formatter. |
-| `charts.py` | The Altair charts (Phase 1 allocation and yield charts, Phase 2 capital and profit-split charts), built from the engine's own result dicts. |
+| `charts.py` | The Altair charts (Phase 1 allocation, yield and sensitivity charts; Phase 2 capital, profit-split and waterfall charts), built from the engine's own result dicts. |
 | `test_engine.py` | 38 tests covering the maths and its edge cases. |
 | `assets/` | Datavynx brand marks used by the app and this README. |
 | `.streamlit/config.toml` | Brand theme (navy text, gold accent). |
@@ -282,6 +282,8 @@ so swiping across a chart on a phone scrolls the page instead of the chart.
 | Phase 1 | **Yields vs hurdle** — gross return, client yield and house yield as bars against a dashed hurdle line | Gross return and net yield only |
 | Phase 2 | **Client capital over 5 years** — line with the start/end values labelled and payout years marked | Same, worded as "portfolio value" / "withdrawn" |
 | Phase 2 | **Yearly profit split** — client return + house earnings per year, with the cumulative CLTV line over the top | Net gain + performance fee (fee floored to zero, as in the table); no CLTV |
+| Phase 1 | **How the year changes with the return** — client return and house earnings swept across a range of annual returns, hurdle marked, current year marked. Both lines are straight (the engine applies the same split to a shortfall as to a surplus), so the chart's point is the crossings: house earnings pass through zero exactly at the hurdle. | Not shown (it plots house earnings) |
+| Phase 2 | **Capital bridge** — waterfall: start capital + net gains − payouts = final value. Exact, because house earnings never enter the client's capital. | Same, worded "withdrawn" |
 
 Phase 2 charts sit in a **Charts / Table** tab pair so the wide table is one
 tap away rather than the first thing a phone shows. Chart pairs use
