@@ -1,0 +1,12 @@
+# Datavynx Analytics brand theme.
+# Navy is the primary colour, white the secondary, gold an accent that the
+# brand guidelines restrict to structure, emphasis and hierarchy -- so it is
+# used for interactive accents (buttons, focus, selection) rather than as a
+# background. The surface stays light because the tool is read as dense
+# financial tables.
+[theme]
+primaryColor = "#CBA135"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F5F7"
+textColor = "#0A1424"
+font = "sans serif"

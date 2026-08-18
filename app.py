@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from engine import (
     calculate_single_year,
@@ -14,7 +15,54 @@ import streamlit as st
 # pyrefly: ignore [missing-import]
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="Fund Management Service Charge Calculator", layout="wide")
+# --------------------------- Datavynx branding ---------------------------
+# Palette sampled from the supplied brand assets. The guidelines make navy
+# primary, white secondary and restrict gold to structure, emphasis and
+# hierarchy -- so gold marks the column that matters, never a whole surface.
+BRAND_NAVY = "#0A1424"
+BRAND_GOLD = "#CBA135"
+BRAND_MUTED = "#5A6473"
+BRAND_NEGATIVE = "#C0392B"
+
+ASSETS_DIR = Path(__file__).parent / "assets"
+BRAND_LOGO = ASSETS_DIR / "datavynx-logo.png"
+BRAND_ICON = ASSETS_DIR / "datavynx-icon.png"
+
+# Paths are resolved from this file rather than the working directory so the
+# app can be launched from anywhere.
+st.set_page_config(
+    page_title="Datavynx | Fund Management Service Charge Calculator",
+    page_icon=str(BRAND_ICON) if BRAND_ICON.exists() else "📊",
+    layout="wide",
+)
+
+_BRAND_CSS = f"""
+<style>
+  h1, h2, h3, h4 {{ color: {BRAND_NAVY}; letter-spacing: -0.01em; }}
+  /* Gold rule under the page title -- the brand's "structure" cue. */
+  .dv-titlebar {{
+      border-bottom: 3px solid {BRAND_GOLD};
+      padding-bottom: 0.35rem;
+      margin-bottom: 0.35rem;
+  }}
+  .dv-eyebrow {{
+      color: {BRAND_MUTED};
+      font-size: 0.78rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 0.15rem;
+  }}
+  .dv-footer {{
+      color: {BRAND_MUTED};
+      font-size: 0.78rem;
+      border-top: 1px solid rgba(10, 20, 36, 0.12);
+      margin-top: 2.5rem;
+      padding-top: 0.75rem;
+  }}
+  [data-testid="stMetricValue"] {{ color: {BRAND_NAVY}; }}
+</style>
+"""
+st.markdown(_BRAND_CSS, unsafe_allow_html=True)
 
 def format_input_callback(key: str, group: bool = True):
     """Callback to format the input field automatically after the user hits Enter/blur
@@ -450,18 +498,18 @@ def render_projection(snapshot: dict):
 
     def negative_red(value):
         # Formatted negatives all start with "-" (-₹1,000.00, -1.60%)
-        return "color: #e5484d" if str(value).startswith("-") else ""
+        return f"color: {BRAND_NEGATIVE}" if str(value).startswith("-") else ""
 
     styled = (
         display.style
         .map(negative_red, subset=currency_columns + percent_columns)
         .set_properties(
             subset=["Ending Capital"],
-            **{"background-color": "rgba(46, 160, 67, 0.14)"},
+            **{"background-color": "rgba(203, 161, 53, 0.18)"},
         )
         .set_properties(
             subset=pd.IndexSlice[["5-Year Total"], :],
-            **{"background-color": "rgba(110, 118, 129, 0.16)"},
+            **{"background-color": "rgba(10, 20, 36, 0.06)"},
         )
     )
     st.dataframe(styled)
@@ -607,18 +655,18 @@ def render_projection_client(snapshot: dict):
             lambda v: f"{v:.2f}%" if pd.notna(v) else "–")
 
     def negative_red(value):
-        return "color: #e5484d" if str(value).startswith("-") else ""
+        return f"color: {BRAND_NEGATIVE}" if str(value).startswith("-") else ""
 
     styled = (
         display.style
         .map(negative_red, subset=currency_columns + percent_columns)
         .set_properties(
             subset=["Closing Balance"],
-            **{"background-color": "rgba(46, 160, 67, 0.14)"},
+            **{"background-color": "rgba(203, 161, 53, 0.18)"},
         )
         .set_properties(
             subset=pd.IndexSlice[["5-Year Total"], :],
-            **{"background-color": "rgba(110, 118, 129, 0.16)"},
+            **{"background-color": "rgba(10, 20, 36, 0.06)"},
         )
     )
     st.dataframe(styled)
@@ -738,6 +786,14 @@ def projection_settings_grid(annual_return, hurdle_rate, client_split) -> pd.Dat
 
 
 def main():
+    # st.logo's dual-image mode served the icon in both slots here, so the
+    # full lockup is placed explicitly at the top of the sidebar instead,
+    # while st.logo supplies only the small mark in the app header.
+    if BRAND_ICON.exists():
+        st.logo(str(BRAND_ICON), size="large")
+    if BRAND_LOGO.exists():
+        st.sidebar.image(str(BRAND_LOGO), use_container_width=True)
+
     # Chosen before anything renders so every section below can branch on it.
     view = st.sidebar.radio(
         "View", ["Internal", "Client"], horizontal=True, key="view_mode",
@@ -748,7 +804,13 @@ def main():
     client_view = view == "Client"
     st.sidebar.markdown("---")
 
-    st.title("Fund Management Service Charge Calculator")
+    st.markdown(
+        '<div class="dv-titlebar">'
+        '<div class="dv-eyebrow">Datavynx Analytics</div>'
+        '<h1 style="margin:0">Fund Management Service Charge Calculator</h1>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
     if client_view:
         # Deliberately loud: the main risk with this feature is screen-sharing
         # the wrong view, so the active mode must be unmissable. The banner
@@ -955,6 +1017,12 @@ def main():
             render_phase1(snapshot)
             if snapshot["projection_rows"]:
                 render_projection(snapshot)
+
+    st.markdown(
+        '<div class="dv-footer">Datavynx Analytics &middot; '
+        "Fund Management Service Charge Calculator</div>",
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":

@@ -1,4 +1,15 @@
-# Fund Management Service Charge Calculator
+<p align="center">
+  <img src="assets/datavynx-logo.png" alt="Datavynx Analytics" width="480">
+</p>
+
+<h1 align="center">Fund Management Service Charge Calculator</h1>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/tests-38%20passing-CBA135?style=flat-square" alt="tests">
+  <img src="https://img.shields.io/badge/python-3.14-0A1424?style=flat-square" alt="python">
+  <img src="https://img.shields.io/badge/streamlit-1.61-0A1424?style=flat-square" alt="streamlit">
+  <img src="https://img.shields.io/badge/internal%20use-only-C0392B?style=flat-square" alt="internal use only">
+</p>
 
 An internal Streamlit tool for modelling fund management fees under a
 hurdle-rate-plus-profit-share arrangement.
@@ -39,6 +50,8 @@ Tested against Python 3.14, Streamlit 1.61.1, pandas 3.0.5.
 | `engine.py` | All calculation logic. **No Streamlit import** — importable and testable on its own. |
 | `app.py` | Everything UI: views, renderers, the projection grid, the input formatter. |
 | `test_engine.py` | 38 tests covering the maths and its edge cases. |
+| `assets/` | Datavynx brand marks used by the app and this README. |
+| `.streamlit/config.toml` | Brand theme (navy text, gold accent). |
 | `requirements.txt` | `streamlit`, `pandas`, `pytest`. |
 
 The split exists so the maths can be exercised directly:
@@ -251,6 +264,30 @@ The suite has been mutation-tested — six deliberate engine bugs (cap
 comparison flipped, payout not deducted, house earnings compounding into
 client capital, hurdle dropped from the client return, wrong digit grouping,
 shares swapped) were all caught.
+
+---
+
+## Branding
+
+| Token | Value | Use |
+|---|---|---|
+| Navy | `#0A1424` | Primary — headings, metric values, body text |
+| White | `#FFFFFF` | Secondary — surfaces |
+| Gold | `#CBA135` | Accent — **restricted** to structure, emphasis and hierarchy |
+
+Per the brand guidelines gold is an accent, not a surface, so it is used for
+the rule under the page title, interactive accents, and the tint on the
+Ending Capital / Closing Balance column — the one figure a reader should land
+on. It is never used as a background fill.
+
+| Asset | Purpose |
+|---|---|
+| `assets/datavynx-logo.png` | Sidebar mark (`st.logo`) and this README's header |
+| `assets/datavynx-icon.png` | Browser favicon, and the sidebar mark when collapsed |
+| `assets/datavynx-logo-transparent.png` | Spare, for light or coloured backgrounds |
+
+Colours are defined once as `BRAND_*` constants at the top of `app.py` and in
+`.streamlit/config.toml`; change them in those two places rather than inline.
 
 ---
 
