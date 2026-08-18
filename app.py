@@ -672,7 +672,8 @@ def render_phase1_client(snapshot: dict):
     with col2:
         st.metric("Net Yield", f"{results['final_client_yield']:,.2f}%")
     with col3:
-        # Floored per the agreed rule: a below-hurdle year charges nothing.
+        # The engine charges nothing at or below the hurdle; "No fee" just
+        # says so in words instead of ₹0.00.
         st.metric("Performance Fee", format_inr(fee) if fee > 0 else "No fee")
 
     if fee <= 0:
@@ -701,9 +702,8 @@ def render_projection_client(snapshot: dict):
     df = pd.DataFrame(rows).set_index("Year")
     df.index = [f"Year {y}" for y in df.index]
 
-    # Balances come straight from the engine so the client view and the
-    # internal view never disagree about the client's money. Only the fee
-    # presentation is floored.
+    # Every figure comes straight from the engine, so the client view and
+    # the internal view can never disagree about the client's money.
     client_df = df[list(CLIENT_COLUMN_LABELS)].rename(columns=CLIENT_COLUMN_LABELS)
 
     st.markdown("---")
@@ -713,8 +713,8 @@ def render_projection_client(snapshot: dict):
     final_capital = float(df["Ending Capital"].iloc[-1])
     total_withdrawn = round(float(df["Payout Taken"].sum()), 2)
     total_net_gain = round(float(df["Total Client Return"].sum()), 2)
-    # The engine never charges a fee at or below the hurdle, so this is
-    # already "fees actually charged" -- no flooring needed.
+    # The engine never charges a fee at or below the hurdle, so this sum is
+    # exactly the fees actually charged.
     total_fees = round(float(df["House Earnings"].sum()), 2)
 
     m1, m2, m3 = st.columns(3)

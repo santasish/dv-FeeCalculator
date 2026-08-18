@@ -57,6 +57,7 @@ Tested against Python 3.14, Streamlit 1.61.1, pandas 3.0.5.
 | `test_engine.py` | 41 tests covering the maths and its edge cases. |
 | `assets/` | Datavynx brand marks used by the app and this README. |
 | `.streamlit/config.toml` | Brand theme (navy text, gold accent). |
+| `.claude/launch.json` | Dev-server definition: `streamlit run app.py` on port 8502, headless. |
 | `requirements.txt` | `streamlit`, `altair`, `pandas`, `pytest`. |
 
 The split exists so the maths can be exercised directly:
@@ -126,24 +127,43 @@ amount is taken in full without a warning.
 
 ## Loss years and sub-hurdle years
 
-Three business rules, confirmed 2026-08-18 and pinned by tests:
+The fund house is paid only out of profit **above** the hurdle. Three rules
+follow from that, and the test suite pins each of them:
 
-1. **Loss year** — the client bears the whole loss; the house charges nothing.
-2. **Profit at or below the hurdle** — the client keeps all of it; the house
-   charges nothing.
-3. **Profit above the hurdle** — the client receives the hurdle amount plus
-   its split of the excess; the house receives its split of the excess.
+| Year's result | Client receives | House receives |
+|---|---|---|
+| **Loss** | the whole loss | nothing |
+| **Profit at or below the hurdle** | the whole profit | nothing |
+| **Profit above the hurdle** | hurdle amount + its split of the excess | its split of the excess |
 
-So House Earnings is never negative and CLTV is never reduced by a bad year —
-it simply does not grow in one. The Internal audit trail collapses steps 3–6
-into a "nothing to split" note for such a year; the Client view shows
-**"No fee"** and its CSV writes `0.0`, both straight from the engine rather
-than by display flooring. Net Gain equals Gross Gain in those years.
+On ₹1 crore with a 12 % hurdle and a 60/40 split:
 
-(Until 2026-08-18 the engine split a shortfall 70/30 as well, giving the
-house a *negative* share; that was replaced by the rules above. If the rule
-ever changes again, the place to intervene is `calculate_single_year` in
-`engine.py` — everything else derives from it.)
+| Return | Gross | Client return | House earnings |
+|---|---|---|---|
+| −10 % | −₹10,00,000 | −₹10,00,000 | ₹0 |
+| 8 % | ₹8,00,000 | ₹8,00,000 | ₹0 |
+| 12 % | ₹12,00,000 | ₹12,00,000 | ₹0 |
+| 20 % | ₹20,00,000 | ₹16,80,000 | ₹3,20,000 |
+
+Consequences worth knowing:
+
+- **House Earnings is never negative** and **CLTV is never reduced by a bad
+  year** — it simply does not grow in one. The house does not share in a
+  shortfall, and no fee from a good year is clawed back by a bad one.
+- The projection carries a loss straight into the next year's Starting
+  Capital, so a loss year shrinks the base that every later year compounds
+  from — even though it costs the client nothing in fees.
+- The Internal audit trail collapses steps 3–6 into a "nothing to split" note
+  for such a year. The Client view shows **"No fee"** and its CSV writes
+  `0.0`; both come straight from the engine, not from any display rounding.
+  Net Gain equals Gross Gain in those years.
+- In the charts, the profit-allocation bar gives way to plain component bars
+  (there is nothing being carved up), the yearly-split bars have no house
+  segment, and the sensitivity curve shows the house line flat at zero up to
+  the hurdle.
+
+If this rule ever changes, the one place to change it is `calculate_single_year`
+in `engine.py` — every table, chart, CSV and caption derives from its result.
 
 ---
 
@@ -270,7 +290,8 @@ python -m pytest -q      # 41 tests
 
 Coverage includes the INR formatter at each magnitude boundary, the
 `Net Gain + Fee == Gross Gain` identity, return-equals-hurdle, below-hurdle and
-negative-return years, 100/0 and 0/100 splits, zero hurdle, zero capital, the
+loss years (house earns nothing, client keeps the whole result, house earnings
+never negative across a sweep of returns), 100/0 and 0/100 splits, zero hurdle, zero capital, the
 roll-over recurrence, the payout cap boundary either side of exact equality,
 exhausted-capital cascades, per-year override isolation, and the row schema
 that both CSV exports depend on.
@@ -297,9 +318,9 @@ so swiping across a chart on a phone scrolls the page instead of the chart.
 |---|---|---|
 | Phase 1 | **Where the gross profit goes** — one stacked bar: hurdle → client · client share · house share | Net gain · performance fee |
 | Phase 1 | **Yields vs hurdle** — gross return, client yield and house yield as bars against a dashed hurdle line | Gross return and net yield only |
+| Phase 1 | **How the year changes with the return** — client return and house earnings swept across a range of annual returns, hurdle marked, current year marked. House earnings are flat at zero up to the hurdle and rise beyond it; the client line is the full gross result up to the hurdle, then the hurdle plus its split — both kink at the hurdle. Hovering or tapping anywhere snaps a crosshair to the nearest return and reads both lines at once: a dot on each with "Client ₹…" / "House ₹…" beside it, the return at the top, and a three-line tooltip. | Not shown (it plots house earnings) |
 | Phase 2 | **Client capital over 5 years** — line with the start/end values labelled and payout years marked | Same, worded as "portfolio value" / "withdrawn" |
 | Phase 2 | **Yearly profit split** — client return + house earnings per year, with the cumulative CLTV line over the top | Net gain + performance fee (no fee segment in a sub-hurdle year); no CLTV |
-| Phase 1 | **How the year changes with the return** — client return and house earnings swept across a range of annual returns, hurdle marked, current year marked. House earnings are flat at zero up to the hurdle and rise beyond it; the client line is the full gross result up to the hurdle, then the hurdle plus its split — both kink at the hurdle. Hovering or tapping anywhere snaps a crosshair to the nearest return and reads both lines at once: a dot on each with "Client ₹…" / "House ₹…" beside it, the return at the top, and a three-line tooltip. | Not shown (it plots house earnings) |
 | Phase 2 | **Capital bridge** — waterfall: start capital + net gains − payouts = final value. Exact, because house earnings never enter the client's capital. | Same, worded "withdrawn" |
 
 Phase 2 charts sit in a **Charts / Table** tab pair so the wide table is one

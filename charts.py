@@ -309,7 +309,11 @@ def _horizontal_bars(df, order, colors, value_field, axis, palette,
         layers += [rule, rule_label]
 
     height = 30 * len(order) + (28 if threshold else 8)
-    return alt.layer(*layers).properties(height=height)
+    # The threshold label is the topmost mark; Vega's estimate of its bounds
+    # runs a pixel or two short, so give it headroom rather than a shaved top.
+    return alt.layer(*layers).properties(
+        height=height, padding={"top": 10, "left": 5, "right": 5, "bottom": 5},
+    )
 
 
 # ------------------------------------------------------------------ Phase 2
