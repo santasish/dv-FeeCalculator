@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from charts import (
+    allocation_5yr_chart,
     allocation_chart,
     capital_chart,
     sensitivity_chart,
@@ -436,13 +437,12 @@ def render_phase1_charts(rates: dict, results: dict, client_view: bool):
 
 
 def render_projection_charts(snapshot: dict, client_view: bool):
-    """The projection charts: two side by side, the capital bridge, then the
-    market-shock explorer.
+    """The projection charts: a 2x2 grid, then the market-shock explorer.
 
-    Columns stack on a phone. The bridge is half width on desktop -- with
-    only three or four bars a full-width waterfall spreads them too far
-    apart to read as one bridge. The shock explorer sits full width beneath:
-    it is the only what-if view, and its slider needs the room.
+    Row 1 is the path (capital over time, yearly split); row 2 is the
+    end-state (capital bridge) and the aggregate carve-up (5-year
+    allocation). The shock explorer sits full width beneath: it is the only
+    what-if view, and its slider needs the room. Columns stack on a phone.
     """
     rows = snapshot["projection_rows"]
     # Snapshots stored before the grid parameters were kept lack this key;
@@ -463,13 +463,23 @@ def render_projection_charts(snapshot: dict, client_view: bool):
         )
         show_chart(yearly_split_chart(rows, client_view))
 
-    bridge, _ = st.columns(2)
-    with bridge:
+    left, right = st.columns(2)
+    with left:
         st.markdown(
             "**From starting capital to final value**" if client_view
             else "**Capital bridge: start to final**"
         )
         show_chart(waterfall_chart(rows, client_view))
+    with right:
+        st.markdown(
+            "**Where your 5-year gain went**" if client_view
+            else "**Five-year allocation**"
+        )
+        chart = allocation_5yr_chart(rows, client_view)
+        if chart is not None:
+            show_chart(chart)
+        else:
+            st.caption("No profit to allocate across the plan.")
 
     if plan:
         st.markdown(

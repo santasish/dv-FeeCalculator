@@ -724,6 +724,103 @@ def waterfall_chart(rows: list, client_view: bool) -> alt.LayerChart:
     return alt.layer(bars, connectors, labels).properties(height=260)
 
 
+def allocation_5yr_chart(rows: list, client_view: bool) -> alt.LayerChart | None:
+    """One horizontal stacked bar: how the whole five-year gross profit is
+    carved up. The single-year twin of ``allocation_chart``, but summed
+    across the plan instead of drawn per year.
+
+    Differs from ``yearly_split_chart``: that one has a time axis (bars per
+    year) and lumps the hurdle amount into "Client return" each year, with
+    a cumulative CLTV line on top. This one drops time entirely and breaks
+    the hurdle-guaranteed portion out from the client's share of the upside
+    -- a split that appears nowhere else, aggregated to plain rupees.
+
+    If every year cleared its hurdle the split is exact and cumulative:
+    hurdle amounts + the client's share of the excess + the house's share.
+    If any year did not clear its hurdle (a loss or a sub-hurdle year), that
+    year's whole result was the client's outright, not a hurdle-plus-split,
+    so a 3-way carve-up bar would misstate it -- the chart falls back to
+    the same plain component bars Phase 1 uses for a single such year,
+    applied to the 5-year totals net of the bad year.
+    """
+    c = _colors()
+    total_gross = round(sum(float(r["Gross Profit"]) for r in rows), 2)
+    total_client_return = round(sum(float(r["Total Client Return"]) for r in rows), 2)
+    total_house = round(sum(float(r["House Earnings"]) for r in rows), 2)
+    all_cleared = all(float(r["Remaining Profit"]) > 0 for r in rows)
+
+    if not all_cleared:
+        return _components_chart({
+            "gross_profit": total_gross,
+            "total_client_return": total_client_return,
+            "total_fund_house_earnings": total_house,
+        }, client_view)
+
+    if client_view:
+        segments = [
+            ("Net gain", total_client_return, c["client"]),
+            ("Performance fee", total_house, c["house"]),
+        ]
+    else:
+        total_hurdle = round(sum(float(r["Hurdle Amount"]) for r in rows), 2)
+        total_excess = round(sum(float(r["Client Share"]) for r in rows), 2)
+        segments = [
+            ("Hurdle → client", total_hurdle, c["hurdle"]),
+            ("Client share", total_excess, c["client"]),
+            ("House share", total_house, c["house"]),
+        ]
+    segments = [s for s in segments if s[1] > 0]
+    total = sum(value for _, value, _ in segments)
+    if total <= 0:
+        return None
+
+    rows_, start = [], 0.0
+    for label, value, color in segments:
+        rows_.append({
+            "Segment": label,
+            "x0": start,
+            "x1": start + value,
+            "mid": start + value / 2,
+            "Amount": format_inr(value),
+            "Share": f"{value / total * 100:.1f}% of gross",
+            "Label": fmt_short(value),
+            "label_ink": _LABEL_INK.get(color, c["ink"]),
+            "show_label": value / total >= 0.14,
+        })
+        start += value
+    df = pd.DataFrame(rows_)
+
+    base = alt.Chart(df)
+    bars = base.mark_bar(
+        height=56, cornerRadius=4, stroke=c["surface"], strokeWidth=2,
+    ).encode(
+        x=alt.X("x0:Q", axis=None, scale=alt.Scale(domain=[0, total], nice=False)),
+        x2="x1:Q",
+        color=alt.Color(
+            "Segment:N",
+            scale=alt.Scale(domain=[s[0] for s in segments], range=[s[2] for s in segments]),
+            legend=_LEGEND_TOP,
+        ),
+        tooltip=[
+            alt.Tooltip("Segment:N", title="Component"),
+            alt.Tooltip("Amount:N", title="Amount"),
+            alt.Tooltip("Share:N", title="Share"),
+        ],
+    )
+    labels = base.transform_filter(alt.datum.show_label).mark_text(
+        fontSize=14, fontWeight="bold",
+    ).encode(
+        x=alt.X("mid:Q"), text="Label:N",
+        color=alt.Color("label_ink:N", scale=None, legend=None),
+    )
+
+    return (
+        alt.layer(bars, labels)
+        .resolve_scale(color="independent")
+        .properties(height=56)
+    )
+
+
 def _signed(value: float) -> str:
     """+₹2.1L / −₹9.2L / ±₹0 -- a difference against the plan."""
     if round(value, 2) == 0:
