@@ -326,23 +326,48 @@ disagree. Altair is used because it ships with Streamlit (no extra
 dependency), follows the Streamlit theme, and has no pan/zoom by default —
 so swiping across a chart on a phone scrolls the page instead of the chart.
 
-| Where | Internal view | Client view |
-|---|---|---|
-| Phase 1 | **Where the gross profit goes** — one stacked bar: hurdle → client · client share · house share | Net gain · performance fee |
-| Phase 1 | **Yields vs hurdle** — gross return, client yield and house yield as bars against a dashed hurdle line | Gross return and net yield only |
-| Phase 1 | **How the year changes with the return** — client return and house earnings swept across a range of annual returns, hurdle marked, current year marked. House earnings are flat at zero up to the hurdle and rise beyond it; the client line is the full gross result up to the hurdle, then the hurdle plus its split — both kink at the hurdle. Hovering or tapping anywhere snaps a crosshair to the nearest return and reads both lines at once: a dot on each with "Client ₹…" / "House ₹…" beside it, the return at the top, and a three-line tooltip. | Not shown (it plots house earnings) |
-| Phase 2 | **Client capital over 5 years** — line with the start/end values labelled and payout years marked | Same, worded as "portfolio value" / "withdrawn" |
-| Phase 2 | **Yearly profit split** — client return + house earnings per year, with the cumulative CLTV line over the top | Net gain + performance fee (no fee segment in a sub-hurdle year); no CLTV |
-| Phase 2 | **Capital bridge** — waterfall: start capital + net gains − payouts = final value. Exact, because house earnings never enter the client's capital. | Same, worded "withdrawn" |
-| Phase 2 | **Five-year allocation** — one stacked bar, the same hurdle → client / client share / house share carve-up as Phase 1's allocation chart but summed across the plan, with no time axis. It is the only view that separates the hurdle-guaranteed portion from the client's share of the upside at the aggregate level — the yearly-split chart lumps both into one "Client return" segment each year. If every year cleared its hurdle the bar is exact and stacked; if any year did not, a stacked carve-up would misstate that year, so it falls back to Phase 1's plain component bars (gross vs. client return vs. house earnings, net of the bad year). | "Net gain" / "Performance fee", same fallback |
-| Phase 2 | **The plan under a market shock** — a slider (rendered by Vega, no rerun) adds Δ points, −20 to +20, to *every year's* planned return; the client-capital path and the cumulative house earnings redraw instantly against dashed ghosts of the plan. Each Δ is a real run of `simulate_five_years` on the grid's own parameters, so Δ = 0 matches the table exactly. End labels state the difference vs plan; years the house earns nothing are tagged "no fee"; hover reads any year. Shows the asymmetry the hurdle creates: a −5 pt shock costs the client ~12 % of final capital but the house ~65 % of CLTV. | Portfolio line only, worded "If markets do better or worse than assumed" |
+| Where | Chart | Internal view | Client view |
+|---|---|---|---|
+| Phase 1 | **Where the gross profit goes** | one stacked bar: hurdle → client · client share · house share | net gain · performance fee |
+| Phase 1 | **Yields vs hurdle** | gross return, client yield and house yield as bars against a dashed hurdle line | gross return and net yield only |
+| Phase 1 | **How the year changes with the return** † | both sides swept across a range of annual returns | *not shown* — it plots house earnings |
+| Phase 2 | **Client capital over 5 years** | line with the start/end values labelled and payout years marked | same, worded "portfolio value" / "withdrawn" |
+| Phase 2 | **Yearly profit split** | client return + house earnings per year, cumulative CLTV line over the top | net gain + performance fee; no CLTV |
+| Phase 2 | **Capital bridge** | waterfall: start capital + net gains − payouts = final value | same, worded "withdrawn" |
+| Phase 2 | **Five-year allocation** † | the Phase 1 carve-up, summed across the whole plan | "net gain" / "performance fee" |
+| Phase 2 | **The plan under a market shock** † | slider-driven what-if over the whole projection | portfolio line only |
 
-An earlier version of the fourth chart was a per-year "effective fee rate vs
-headline split" — house earnings ÷ that year's gross, against the headline
-split. It required a paragraph of explanation to read (a ratio of a ratio)
-and didn't earn that cost, so it was replaced 2026-08-18 with the five-year
-allocation bar above: the same idea, but concrete rupees instead of a
-derived percentage.
+The three marked **†** carry more than a line of behaviour:
+
+**How the year changes with the return.** House earnings are flat at zero up
+to the hurdle and rise beyond it; the client line is the full gross result up
+to the hurdle, then the hurdle plus its split — so both kink at the hurdle,
+which is the fee rule made visible. Hovering or tapping anywhere snaps a
+crosshair to the nearest return and reads both lines at once: a dot on each
+with "Client ₹…" / "House ₹…" beside it, the return at the top, and a
+three-line tooltip.
+
+**Five-year allocation.** The same hurdle → client / client share / house
+share carve-up as Phase 1's allocation chart, but summed across the plan with
+no time axis. It is the only view that separates the hurdle-guaranteed
+portion from the client's share of the upside at aggregate level — the
+yearly-split chart lumps both into one "Client return" segment per year. If
+every year cleared its hurdle the bar is exact and stacked; if any year did
+not, a stacked carve-up would misstate it, so the chart falls back to Phase
+1's plain component bars (gross vs. client return vs. house earnings, net of
+the bad year). An earlier version of this slot was a per-year "effective fee
+rate vs headline split" — a ratio of a ratio that needed a paragraph to read,
+replaced 2026-08-18 by this concrete-rupees version.
+
+**The plan under a market shock.** A slider (rendered by Vega, no rerun) adds
+Δ points, −20 to +20, to *every year's* planned return; the client-capital
+path and the cumulative house earnings redraw instantly against dashed ghosts
+of the plan. Each Δ is a real run of `simulate_five_years` on the grid's own
+parameters, so Δ = 0 matches the table exactly. End labels state the
+difference vs plan, years the house earns nothing are tagged "no fee", and
+hover reads any year. It exists to show the asymmetry the hurdle creates: a
+−5 pt shock costs the client ~12 % of final capital but the house ~65 % of
+CLTV.
 
 ### Layout and responsiveness
 
