@@ -104,12 +104,42 @@ def test_return_equal_to_hurdle_leaves_nothing_to_split():
     assert r["total_client_return"] == r["hurdle_amount"]
 
 
-def test_below_hurdle_year_gives_house_a_negative_share():
-    """Documented business rule: the house absorbs its split of a shortfall."""
+def test_below_hurdle_year_client_keeps_all_profit_and_house_earns_nothing():
+    """Business rule 2: profit under the hurdle is entirely the client's."""
     r = calculate_single_year(CAPITAL, 12.0, 60.0, 40.0, 8.0)
-    assert r["remaining_profit"] < 0
-    assert r["total_fund_house_earnings"] < 0
-    assert r["client_share_of_remaining"] < 0
+    assert r["hurdle_cleared"] is False
+    assert r["gross_profit"] == 800_000.0
+    assert r["total_client_return"] == 800_000.0
+    assert r["total_fund_house_earnings"] == 0.0
+    assert r["remaining_profit"] == 0.0
+    assert r["client_share_of_remaining"] == 0.0
+    assert r["final_client_yield"] == 8.0
+    assert r["final_fund_house_yield"] == 0.0
+
+
+def test_loss_year_client_bears_whole_loss_and_house_earns_nothing():
+    """Business rule 1: a loss is entirely the client's; the fee is never negative."""
+    r = calculate_single_year(CAPITAL, 12.0, 60.0, 40.0, -10.0)
+    assert r["hurdle_cleared"] is False
+    assert r["gross_profit"] == -1_000_000.0
+    assert r["total_client_return"] == -1_000_000.0
+    assert r["total_fund_house_earnings"] == 0.0
+    assert r["final_client_yield"] == -10.0
+
+
+def test_house_earnings_are_never_negative_across_the_range():
+    for annual_return in (-50.0, -15.0, 0.0, 5.0, 11.99, 12.0, 12.01, 20.0, 45.0):
+        r = calculate_single_year(CAPITAL, 12.0, 60.0, 40.0, annual_return)
+        assert r["total_fund_house_earnings"] >= 0.0
+        assert r["hurdle_cleared"] == (annual_return > 12.0)
+
+
+def test_above_hurdle_still_credits_hurdle_plus_split():
+    """Business rule 3 -- unchanged shape above the hurdle."""
+    r = calculate_single_year(CAPITAL, 12.0, 60.0, 40.0, 20.0)
+    assert r["hurdle_cleared"] is True
+    assert r["total_client_return"] == r["hurdle_amount"] + r["client_share_of_remaining"]
+    assert r["total_fund_house_earnings"] == r["fund_house_share_of_remaining"] > 0
 
 
 def test_full_client_split_leaves_house_with_nothing():

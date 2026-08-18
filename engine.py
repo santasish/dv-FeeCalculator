@@ -51,6 +51,18 @@ def calculate_single_year(
 ) -> dict:
     """
     Core Calculation Engine (Pure Python Function)
+
+    The fund house is paid only out of profit above the hurdle. Business rules
+    (confirmed 2026-08-18):
+
+    1. Loss year -- the client bears the whole loss; the house charges nothing.
+    2. Profit at or below the hurdle -- the client keeps all of it; the house
+       charges nothing.
+    3. Profit above the hurdle -- the client receives the hurdle amount plus
+       its split of the excess; the house receives its split of the excess.
+
+    So ``hurdle_cleared`` decides which of two shapes the year takes, and in
+    every case ``total_client_return + total_fund_house_earnings == gross_profit``.
     """
     # 1. Gross Profit = Capital Employed * (Annual Return % / 100)
     gross_profit = round(capital_employed * (predicted_annual_return / 100), 2)
@@ -58,19 +70,33 @@ def calculate_single_year(
     # 2. Hurdle Amount = Capital Employed * (Hurdle Rate % / 100)
     hurdle_amount = round(capital_employed * (hurdle_rate / 100), 2)
 
-    # 3. Remaining Profit = Gross Profit - Hurdle Amount
-    remaining_profit = round(gross_profit - hurdle_amount, 2)
+    # Exactly at the hurdle there is no excess to share, so both branches
+    # agree; the strict comparison just picks the simpler one.
+    hurdle_cleared = gross_profit > hurdle_amount
 
-    # 4. Client Share of Remaining = Remaining Profit * (Client Split % / 100)
-    client_share_of_remaining = round(remaining_profit * (client_split / 100), 2)
+    if hurdle_cleared:
+        # 3. Remaining Profit = Gross Profit - Hurdle Amount
+        remaining_profit = round(gross_profit - hurdle_amount, 2)
 
-    # 5. Fund House Share of Remaining = Remaining Profit * (Fund House Split % / 100)
-    fund_house_share_of_remaining = round(remaining_profit * (fund_house_split / 100), 2)
+        # 4. Client Share of Remaining = Remaining Profit * (Client Split % / 100)
+        client_share_of_remaining = round(remaining_profit * (client_split / 100), 2)
 
-    # 6. Total Client Return Amount = Hurdle Amount + Client Share of Remaining
-    total_client_return = round(hurdle_amount + client_share_of_remaining, 2)
+        # 5. Fund House Share of Remaining = Remaining Profit * (Fund House Split % / 100)
+        fund_house_share_of_remaining = round(remaining_profit * (fund_house_split / 100), 2)
 
-    # 7. Total Fund House Earnings = Fund House Share of Remaining
+        # 6. Total Client Return Amount = Hurdle Amount + Client Share of Remaining
+        total_client_return = round(hurdle_amount + client_share_of_remaining, 2)
+    else:
+        # 3-5. Nothing above the hurdle, so nothing is split: no shortfall is
+        # ever shared with the house, in a loss year or a sub-hurdle one.
+        remaining_profit = 0.0
+        client_share_of_remaining = 0.0
+        fund_house_share_of_remaining = 0.0
+
+        # 6. The whole gross result -- profit or loss -- is the client's.
+        total_client_return = gross_profit
+
+    # 7. Total Fund House Earnings = Fund House Share of Remaining (never negative)
     total_fund_house_earnings = fund_house_share_of_remaining
 
     # 8. Final Client Yield % = (Total Client Return Amount / Capital Employed) * 100
@@ -80,6 +106,7 @@ def calculate_single_year(
     final_fund_house_yield = round((total_fund_house_earnings / capital_employed) * 100, 2) if capital_employed != 0 else 0.0
 
     return {
+        "hurdle_cleared": hurdle_cleared,
         "gross_profit": gross_profit,
         "hurdle_amount": hurdle_amount,
         "remaining_profit": remaining_profit,
@@ -106,10 +133,10 @@ def simulate_five_years(initial_capital: float, yearly_params: list) -> tuple:
     Fund house earnings are collected by the house, so they never compound
     into the client's capital.
 
-    Loss years apply the same formula chain, so when gross profit falls short
-    of the hurdle the house's share of the (negative) remaining profit comes
-    out negative. This is deliberate for now -- the house absorbs its share of
-    underperformance -- and may be revisited later.
+    In a loss year or a year at/below the hurdle the house earns nothing and
+    the whole gross result is the client's (see ``calculate_single_year``), so
+    House Earnings and CLTV are never reduced by a bad year -- they simply do
+    not grow in it.
 
     Returns (rows, warnings): one row dict per year for the projection table,
     plus human-readable warnings for any payout that had to be capped at the

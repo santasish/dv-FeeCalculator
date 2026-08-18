@@ -4,8 +4,7 @@ Every chart here is built from the same numbers the tables show (the engine's
 result dicts / projection rows), so a chart can never disagree with the table
 beside it. Client-view variants take a ``client_view`` flag and only ever draw
 client-facing quantities -- fund house earnings, house yield and CLTV never
-reach a client chart, and the fee is floored to zero the same way the client
-table floors it.
+reach a client chart.
 
 Design rules baked in (they matter most on a phone):
 - Rupee axes are scaled to a single unit (₹ Lakh / ₹ Crore) chosen from the
@@ -101,12 +100,14 @@ def allocation_chart(results: dict, client_view: bool) -> alt.LayerChart | None:
     Internal: hurdle (paid to the client) → client share of the remaining →
     fund house share. Client: net gain → performance fee.
 
-    Below the hurdle the "gross profit is the whole bar" reading breaks down
-    (the remaining profit is negative and the shares come out negative), so
-    that case switches to plain component bars, which stay honest with mixed
-    signs. Returns None when there is nothing to draw.
+    At or below the hurdle nothing is split -- the whole gross result is the
+    client's and the house earns nothing -- so a "how gross is carved up" bar
+    has nothing to say (and cannot show a loss). That case switches to plain
+    component bars, which stay honest with a negative gross. Returns None
+    when there is nothing to draw.
     """
-    if results["remaining_profit"] < 0:
+    # .get(): a results snapshot stored before this key existed lacks it.
+    if not results.get("hurdle_cleared", results["remaining_profit"] > 0):
         return _components_chart(results, client_view)
 
     c = _colors()
@@ -176,15 +177,14 @@ def allocation_chart(results: dict, client_view: bool) -> alt.LayerChart | None:
 
 
 def _components_chart(results: dict, client_view: bool) -> alt.LayerChart:
-    """Below-hurdle fallback: gross vs what each side ends up with."""
+    """At/below-hurdle fallback: gross vs what each side ends up with."""
     c = _colors()
     fee = results["total_fund_house_earnings"]
     if client_view:
         rows = [
             ("Gross gain", results["gross_profit"], c["muted"]),
             ("Net gain", results["total_client_return"], c["client"]),
-            # Floored to match the "No fee" the client table shows.
-            ("Performance fee", max(fee, 0.0), c["house"]),
+            ("Performance fee", fee, c["house"]),
         ]
     else:
         rows = [
@@ -363,25 +363,25 @@ def yearly_split_chart(rows: list, client_view: bool) -> alt.LayerChart:
 
     Internal: client return + house earnings (= gross profit) per year, with
     the running total of house earnings drawn over the top so the CLTV figure
-    can be seen building. Client: net gain + performance fee (floored to zero
-    in below-hurdle years, matching the client table).
+    can be seen building. Client: net gain + performance fee. A year at or
+    below the hurdle has no house segment at all.
     """
     c = _colors()
     if client_view:
         components = [
-            ("Net gain", "Total Client Return", c["client"], False),
-            ("Performance fee", "House Earnings", c["house"], True),
+            ("Net gain", "Total Client Return", c["client"]),
+            ("Performance fee", "House Earnings", c["house"]),
         ]
     else:
         components = [
-            ("Client return", "Total Client Return", c["client"], False),
-            ("House earnings", "House Earnings", c["house"], False),
+            ("Client return", "Total Client Return", c["client"]),
+            ("House earnings", "House Earnings", c["house"]),
         ]
 
     long_rows = []
     for r in rows:
-        for order, (name, column, _, floor) in enumerate(components):
-            amount = max(r[column], 0.0) if floor else r[column]
+        for order, (name, column, _) in enumerate(components):
+            amount = r[column]
             long_rows.append({
                 "Period": f"Yr {r['Year']}",
                 "Component": name,
@@ -414,8 +414,8 @@ def yearly_split_chart(rows: list, client_view: bool) -> alt.LayerChart:
         color=alt.Color(
             "Component:N",
             scale=alt.Scale(
-                domain=[n for n, *_ in components],
-                range=[col for _, _, col, _ in components],
+                domain=[n for n, _, _ in components],
+                range=[col for _, _, col in components],
             ),
             legend=_LEGEND_TOP,
         ),
@@ -465,11 +465,10 @@ def sensitivity_chart(rates: dict) -> alt.LayerChart:
     """Internal only: client return and house earnings as the return varies.
 
     Sweeps the annual return across a range around the current inputs with
-    everything else held fixed. Both lines are straight (the engine applies the
-    same split to a shortfall as to a surplus, so the house absorbs its share of
-    a below-hurdle year), which makes the point of the chart the crossings:
-    house earnings pass through zero exactly at the hurdle, and the client's
-    break-even return sits left of it. The current year is marked on both
+    everything else held fixed. The house line is flat at zero up to the
+    hurdle and rises beyond it (its split of the excess); the client line is
+    the full gross result up to the hurdle, then the hurdle plus its split --
+    so both lines kink at the hurdle. The current year is marked on both
     lines. Never shown in Client view (it draws house earnings).
     """
     c = _colors()

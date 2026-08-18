@@ -5,7 +5,7 @@
 <h1 align="center">Fund Management Service Charge Calculator</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-38%20passing-CBA135?style=flat-square" alt="tests">
+  <img src="https://img.shields.io/badge/tests-41%20passing-CBA135?style=flat-square" alt="tests">
   <img src="https://img.shields.io/badge/python-3.14-0A1424?style=flat-square" alt="python">
   <img src="https://img.shields.io/badge/streamlit-1.61-0A1424?style=flat-square" alt="streamlit">
   <img src="https://img.shields.io/badge/charts-6%20Altair-CBA135?style=flat-square" alt="charts">
@@ -54,7 +54,7 @@ Tested against Python 3.14, Streamlit 1.61.1, pandas 3.0.5.
 | `engine.py` | All calculation logic. **No Streamlit import** — importable and testable on its own. |
 | `app.py` | Everything UI: views, renderers, the projection grid, the input formatter. |
 | `charts.py` | The Altair charts (Phase 1 allocation, yield and sensitivity charts; Phase 2 capital, profit-split and waterfall charts), built from the engine's own result dicts. |
-| `test_engine.py` | 38 tests covering the maths and its edge cases. |
+| `test_engine.py` | 41 tests covering the maths and its edge cases. |
 | `assets/` | Datavynx brand marks used by the app and this README. |
 | `.streamlit/config.toml` | Brand theme (navy text, gold accent). |
 | `requirements.txt` | `streamlit`, `altair`, `pandas`, `pytest`. |
@@ -77,16 +77,24 @@ that totals 100%:
 ```
 1. Gross Profit        = C × r/100
 2. Hurdle Amount       = C × h/100
-3. Remaining Profit    = Gross Profit − Hurdle Amount
-4. Client Share        = Remaining Profit × client_split/100
-5. House Share         = Remaining Profit × house_split/100
-6. Total Client Return = Hurdle Amount + Client Share
-7. House Earnings      = House Share
+
+   if Gross Profit > Hurdle Amount          (hurdle cleared)
+3.   Remaining Profit    = Gross Profit − Hurdle Amount
+4.   Client Share        = Remaining Profit × client_split/100
+5.   House Share         = Remaining Profit × house_split/100
+6.   Total Client Return = Hurdle Amount + Client Share
+   else                                     (loss, or profit at/below hurdle)
+3-5. Remaining Profit = Client Share = House Share = 0
+6.   Total Client Return = Gross Profit     (the whole result is the client's)
+
+7. House Earnings      = House Share        (never negative)
 8. Client Yield %      = Total Client Return / C × 100
 9. House Yield %       = House Earnings / C × 100
 ```
 
-A useful identity holds by construction, and the client view depends on it:
+The result dict also carries `hurdle_cleared` so the UI can narrate the branch
+that was taken. A useful identity holds by construction in both branches, and
+the client view depends on it:
 
 ```
 Total Client Return + House Earnings == Gross Profit
@@ -116,21 +124,26 @@ amount is taken in full without a warning.
 
 ---
 
-## Loss years (deliberate behaviour)
+## Loss years and sub-hurdle years
 
-When a year's return falls short of the hurdle, Remaining Profit is negative,
-so both the client's and the house's shares come out negative. **The house
-absorbs its split of the underperformance.** This is intentional, not a bug —
-`test_below_hurdle_year_gives_house_a_negative_share` pins it.
+Three business rules, confirmed 2026-08-18 and pinned by tests:
 
-The client view handles this differently: a below-hurdle year displays
-**"No fee"** rather than a negative fee, and the CSV export writes `0.0` to
-match. Because the fee is floored for display but balances come straight from
-the engine, Net Gain can exceed Gross Gain in such a year; a footnote under
-the table explains that the shortfall was absorbed rather than passed on.
+1. **Loss year** — the client bears the whole loss; the house charges nothing.
+2. **Profit at or below the hurdle** — the client keeps all of it; the house
+   charges nothing.
+3. **Profit above the hurdle** — the client receives the hurdle amount plus
+   its split of the excess; the house receives its split of the excess.
 
-If the commercial rule ever changes, the place to intervene is
-`calculate_single_year` / `simulate_five_years` in `engine.py`.
+So House Earnings is never negative and CLTV is never reduced by a bad year —
+it simply does not grow in one. The Internal audit trail collapses steps 3–6
+into a "nothing to split" note for such a year; the Client view shows
+**"No fee"** and its CSV writes `0.0`, both straight from the engine rather
+than by display flooring. Net Gain equals Gross Gain in those years.
+
+(Until 2026-08-18 the engine split a shortfall 70/30 as well, giving the
+house a *negative* share; that was replaced by the rules above. If the rule
+ever changes again, the place to intervene is `calculate_single_year` in
+`engine.py` — everything else derives from it.)
 
 ---
 
@@ -252,7 +265,7 @@ for that warning first.
 ## Testing
 
 ```bash
-python -m pytest -q      # 38 tests
+python -m pytest -q      # 41 tests
 ```
 
 Coverage includes the INR formatter at each magnitude boundary, the
@@ -285,8 +298,8 @@ so swiping across a chart on a phone scrolls the page instead of the chart.
 | Phase 1 | **Where the gross profit goes** — one stacked bar: hurdle → client · client share · house share | Net gain · performance fee |
 | Phase 1 | **Yields vs hurdle** — gross return, client yield and house yield as bars against a dashed hurdle line | Gross return and net yield only |
 | Phase 2 | **Client capital over 5 years** — line with the start/end values labelled and payout years marked | Same, worded as "portfolio value" / "withdrawn" |
-| Phase 2 | **Yearly profit split** — client return + house earnings per year, with the cumulative CLTV line over the top | Net gain + performance fee (fee floored to zero, as in the table); no CLTV |
-| Phase 1 | **How the year changes with the return** — client return and house earnings swept across a range of annual returns, hurdle marked, current year marked. Both lines are straight (the engine applies the same split to a shortfall as to a surplus), so the chart's point is the crossings: house earnings pass through zero exactly at the hurdle. | Not shown (it plots house earnings) |
+| Phase 2 | **Yearly profit split** — client return + house earnings per year, with the cumulative CLTV line over the top | Net gain + performance fee (no fee segment in a sub-hurdle year); no CLTV |
+| Phase 1 | **How the year changes with the return** — client return and house earnings swept across a range of annual returns, hurdle marked, current year marked. House earnings are flat at zero up to the hurdle and rise beyond it; the client line is the full gross result up to the hurdle, then the hurdle plus its split — both kink at the hurdle. | Not shown (it plots house earnings) |
 | Phase 2 | **Capital bridge** — waterfall: start capital + net gains − payouts = final value. Exact, because house earnings never enter the client's capital. | Same, worded "withdrawn" |
 
 Phase 2 charts sit in a **Charts / Table** tab pair so the wide table is one
@@ -302,8 +315,8 @@ Mobile-first details worth keeping when editing `charts.py`:
 - Legends are on top, horizontal.
 - Colour follows the entity: client money blue, house money / fee gold, hurdle
   teal, gross/reference grey. Loss years draw below or left of zero rather than
-  switching chart type; below the hurdle, the allocation bar gives way to plain
-  component bars because "gross = whole bar" no longer holds.
+  switching chart type; at or below the hurdle, the allocation bar gives way to
+  plain component bars because there is nothing being carved up.
 - Client-view charts are separate code paths that only ever receive client
   quantities — house earnings, house yield and CLTV cannot leak into them.
 

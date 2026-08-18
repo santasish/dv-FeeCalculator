@@ -405,8 +405,9 @@ def render_phase1_charts(rates: dict, results: dict, client_view: bool):
         # crossings it exists to show need the horizontal room.
         st.markdown("**How the year changes with the return**")
         st.caption(
-            "Everything else held fixed. House earnings cross zero exactly at "
-            "the hurdle; the client's break-even sits to the left of it."
+            "Everything else held fixed. The house earns nothing up to the "
+            "hurdle and its share of the excess beyond it; below the hurdle "
+            "the whole result, profit or loss, is the client's."
         )
         show_chart(sensitivity_chart(rates))
 
@@ -439,6 +440,49 @@ def render_projection_charts(rows: list, client_view: bool):
             else "**Capital bridge: start to final**"
         )
         show_chart(waterfall_chart(rows, client_view))
+
+
+def _audit_steps_3_to_6(results: dict, client_split, fund_house_split) -> str:
+    """Steps 3-6 of the audit trail, narrating the branch the engine took.
+
+    Above the hurdle the excess is split; at or below it nothing is split and
+    the whole gross result is the client's. Writing the split formulas out
+    for a year that had nothing to split would show a chain of zeros that
+    explains nothing, so that branch says why instead.
+    """
+    gross = format_inr(results["gross_profit"])
+    hurdle = format_inr(results["hurdle_amount"])
+    if results.get("hurdle_cleared", results["remaining_profit"] > 0):
+        remaining = format_inr(results["remaining_profit"])
+        return f"""
+        **3. Remaining Profit** (the excess above the hurdle)
+        - *Formula:* Gross Profit - Hurdle Amount
+        - *Calculation:* {gross} - {hurdle} = **{remaining}**
+
+        **4. Client Share of Remaining**
+        - *Formula:* Remaining Profit * (Client Split % / 100)
+        - *Calculation:* {remaining} * ({client_split} / 100) = **{format_inr(results['client_share_of_remaining'])}**
+
+        **5. Fund House Share of Remaining**
+        - *Formula:* Remaining Profit * (Fund House Split % / 100)
+        - *Calculation:* {remaining} * ({fund_house_split} / 100) = **{format_inr(results['fund_house_share_of_remaining'])}**
+
+        **6. Total Client Return Amount**
+        - *Formula:* Hurdle Amount + Client Share of Remaining
+        - *Calculation:* {hurdle} + {format_inr(results['client_share_of_remaining'])} = **{format_inr(results['total_client_return'])}**
+        """
+    outcome = "a loss" if results["gross_profit"] < 0 else "at or below the hurdle"
+    return f"""
+        **3-5. Remaining Profit / Shares** — nothing to split
+        - Gross Profit {gross} is {outcome} (Hurdle Amount {hurdle}), so there is
+          no excess above the hurdle. Remaining Profit, Client Share and Fund
+          House Share are all **₹0.00**: no shortfall is ever charged to or
+          shared with the fund house.
+
+        **6. Total Client Return Amount**
+        - *Formula:* Gross Profit (the whole result is the client's)
+        - *Calculation:* **{format_inr(results['total_client_return'])}**
+        """
 
 
 def render_phase1(snapshot: dict):
@@ -475,21 +519,7 @@ def render_phase1(snapshot: dict):
         - *Formula:* Capital Employed * (Hurdle Rate % / 100)
         - *Calculation:* {format_inr(capital_employed)} * ({hurdle_rate} / 100) = **{format_inr(results['hurdle_amount'])}**
 
-        **3. Remaining Profit**
-        - *Formula:* Gross Profit - Hurdle Amount
-        - *Calculation:* {format_inr(results['gross_profit'])} - {format_inr(results['hurdle_amount'])} = **{format_inr(results['remaining_profit'])}**
-
-        **4. Client Share of Remaining**
-        - *Formula:* Remaining Profit * (Client Split % / 100)
-        - *Calculation:* {format_inr(results['remaining_profit'])} * ({client_split} / 100) = **{format_inr(results['client_share_of_remaining'])}**
-
-        **5. Fund House Share of Remaining**
-        - *Formula:* Remaining Profit * (Fund House Split % / 100)
-        - *Calculation:* {format_inr(results['remaining_profit'])} * ({fund_house_split} / 100) = **{format_inr(results['fund_house_share_of_remaining'])}**
-
-        **6. Total Client Return Amount**
-        - *Formula:* Hurdle Amount + Client Share of Remaining
-        - *Calculation:* {format_inr(results['hurdle_amount'])} + {format_inr(results['client_share_of_remaining'])} = **{format_inr(results['total_client_return'])}**
+        {_audit_steps_3_to_6(results, client_split, fund_house_split)}
 
         **7. Total Fund House Earnings**
         - *Formula:* Fund House Share of Remaining
@@ -683,8 +713,9 @@ def render_projection_client(snapshot: dict):
     final_capital = float(df["Ending Capital"].iloc[-1])
     total_withdrawn = round(float(df["Payout Taken"].sum()), 2)
     total_net_gain = round(float(df["Total Client Return"].sum()), 2)
-    # Only fees actually charged; below-hurdle years cost the client nothing.
-    total_fees = round(float(df["House Earnings"].clip(lower=0).sum()), 2)
+    # The engine never charges a fee at or below the hurdle, so this is
+    # already "fees actually charged" -- no flooring needed.
+    total_fees = round(float(df["House Earnings"].sum()), 2)
 
     m1, m2, m3 = st.columns(3)
     with m1:
@@ -759,12 +790,8 @@ def render_projection_client(snapshot: dict):
         st.dataframe(styled)
 
         # Built from the client frame so internal columns cannot leak via
-        # export, and the fee is floored to match what the table shows --
-        # otherwise the CSV would report a negative fee for a year displayed
-        # as "No fee".
-        export_df = client_df.copy()
-        export_df["Performance Fee"] = export_df["Performance Fee"].clip(lower=0)
-        export_df = export_df.reset_index(names="Year")
+        # export. A "No fee" year exports as 0.0, which is what it is.
+        export_df = client_df.reset_index(names="Year")
         st.download_button(
             "Download Your Projection (CSV)",
             data=export_df.to_csv(index=False).encode("utf-8"),
@@ -774,13 +801,11 @@ def render_projection_client(snapshot: dict):
 
     if fee_waived_years:
         # Outside the tabs so it is read alongside the charts as well as the
-        # table: without it, a waived fee makes Net Gain look larger than
-        # Gross Gain with no visible explanation.
+        # table.
         st.caption(
             f"No performance fee was charged in {', '.join(fee_waived_years)} "
-            "because the return did not clear the hurdle rate. In those years the "
-            "shortfall against the hurdle is absorbed rather than passed on, so the "
-            "net gain can exceed the gross gain."
+            "because the return did not clear the hurdle rate; the whole gross "
+            "gain (or loss) for those years is yours."
         )
 
     st.caption(PROJECTION_DISCLAIMER)
