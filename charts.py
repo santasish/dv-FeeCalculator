@@ -86,9 +86,27 @@ def fmt_short(value: float) -> str:
     return f"{sign}₹{magnitude:,.0f}"
 
 
+# Streamlit's Vega theme sets ``autosize: fit``, which makes a chart's height
+# the budget for the whole figure -- axes, titles and legends are carved out
+# of it, so a 118px three-bar chart ends up with ~50px of bars. A spec-level
+# autosize overrides the theme's; fit-x fills the container width and keeps
+# ``height`` meaning what it says: the plot area.
+_AUTOSIZE = alt.AutoSizeParams(type="fit-x", contains="padding")
+
+
 def show(chart: alt.TopLevelMixin) -> None:
     """Renders a chart full-width, restyled to the Streamlit theme."""
-    st.altair_chart(chart, width="stretch", theme="streamlit")
+    st.altair_chart(chart.properties(autosize=_AUTOSIZE), width="stretch", theme="streamlit")
+
+
+def _haloed_text(chart: alt.Chart, encodings: dict, **props) -> list:
+    """A text mark over a white-stroked copy of itself, so it stays legible
+    where it lands on a line or a fill (touch has no hover to move it away)."""
+    halo = chart.mark_text(
+        color=_PALETTE["surface"], stroke=_PALETTE["surface"], strokeWidth=5, **props,
+    ).encode(**encodings)
+    text = chart.mark_text(color=_PALETTE["ink"], **props).encode(**encodings)
+    return [halo, text]
 
 
 # ------------------------------------------------------------------ Phase 1
@@ -470,6 +488,12 @@ def sensitivity_chart(rates: dict) -> alt.LayerChart:
     the full gross result up to the hurdle, then the hurdle plus its split --
     so both lines kink at the hurdle. The current year is marked on both
     lines. Never shown in Client view (it draws house earnings).
+
+    Hovering (or tapping) anywhere snaps a crosshair to the nearest return
+    and reads both lines at that point: a ringed dot on each, "Client ₹…"
+    beside the blue one and "House ₹…" beside the gold one, the return at
+    the top of the crosshair, and a tooltip listing all three. Reading the
+    slope never depends on landing on a 2px line.
     """
     c = _colors()
     capital = float(rates["capital"])
@@ -483,16 +507,28 @@ def sensitivity_chart(rates: dict) -> alt.LayerChart:
         returns.append(current)
         returns.sort()
 
-    long_rows = []
+    long_rows, wide_rows = [], []
     for r in returns:
         res = calculate_single_year(
             capital, hurdle, rates["client_split"], rates["fund_house_split"], r,
         )
-        for series, amount in (
-            ("Client return", res["total_client_return"]),
-            ("House earnings", res["total_fund_house_earnings"]),
+        client_amt = res["total_client_return"]
+        house_amt = res["total_fund_house_earnings"]
+        for series, amount, word in (
+            ("Client return", client_amt, "Client"),
+            ("House earnings", house_amt, "House"),
         ):
-            long_rows.append({"Return": r, "Series": series, "Amount": amount})
+            long_rows.append({
+                "Return": r, "Series": series, "Amount": amount,
+                "Hover label": f"{word} {fmt_short(amount)}",
+            })
+        # One row per return with both values: the hover readout and its
+        # tooltip come from here, so a single hit always yields both lines.
+        wide_rows.append({
+            "Return": r, "Return label": f"{r:,.2f}%",
+            "Client return": format_inr(client_amt),
+            "House earnings": format_inr(house_amt),
+        })
     divisor, unit_title = pick_unit(x["Amount"] for x in long_rows)
     for x_ in long_rows:
         x_["Value"] = x_["Amount"] / divisor
@@ -500,6 +536,8 @@ def sensitivity_chart(rates: dict) -> alt.LayerChart:
         x_["Return label"] = f"{x_['Return']:,.2f}%"
         x_["is_current"] = x_["Return"] == current
     df = pd.DataFrame(long_rows)
+    wide = pd.DataFrame(wide_rows)
+    mid = (lo + hi) / 2
 
     x = alt.X(
         "Return:Q",
@@ -523,7 +561,7 @@ def sensitivity_chart(rates: dict) -> alt.LayerChart:
     ).encode(y="y:Q")
 
     hurdle_df = pd.DataFrame({"x": [hurdle], "label": [f"Hurdle {hurdle:,.2f}%"]})
-    hurdle_on_right = hurdle > (lo + hi) / 2
+    hurdle_on_right = hurdle > mid
     hurdle_rule = alt.Chart(hurdle_df).mark_rule(
         color=c["ink"], strokeDash=[4, 3], strokeWidth=1.5,
     ).encode(x="x:Q")
@@ -546,25 +584,63 @@ def sensitivity_chart(rates: dict) -> alt.LayerChart:
             alt.Tooltip("Full:N", title="Amount"),
         ],
     )
-    now_on_right = current > (lo + hi) / 2
-    now_label = now.transform_filter(alt.datum.Series == "Client return").mark_text(
-        align="right" if now_on_right else "left",
-        dx=-10 if now_on_right else 10, color=c["ink"], fontSize=12, fontWeight="bold",
-    ).encode(x=x, y=y, text=alt.value(f"Now: {current:,.2f}%"))
+    # Sits above the dot (not beside it, where the line would strike through
+    # the text), with a halo, so it survives the hover labels landing nearby.
+    now_on_right = current > mid
+    now_label = _haloed_text(
+        now.transform_filter(alt.datum.Series == "Client return"),
+        dict(x=x, y=y, text=alt.value(f"Now: {current:,.2f}%")),
+        align="right" if now_on_right else "left", dx=-4 if now_on_right else 4,
+        dy=-16, baseline="bottom", fontSize=12, fontWeight="bold",
+    )
 
-    # A wide invisible hit target so a tap anywhere near the x position
-    # brings up both values, instead of having to land on a 2px line.
-    hover = base.mark_rule(opacity=0).encode(
+    # Hover / tap readout. The selection snaps to the nearest return, from a
+    # one-row-per-return table, so one hit always resolves both lines.
+    nearest = alt.selection_point(
+        nearest=True, on="pointerover", fields=["Return"], empty=False,
+    )
+    wide_base = alt.Chart(wide)
+    selectors = wide_base.mark_point(opacity=0).encode(
         x=x,
         tooltip=[
             alt.Tooltip("Return label:N", title="Return"),
-            alt.Tooltip("Series:N"),
-            alt.Tooltip("Full:N", title="Amount"),
+            alt.Tooltip("Client return:N"),
+            alt.Tooltip("House earnings:N"),
         ],
+    ).add_params(nearest)
+    picked = wide_base.transform_filter(nearest)
+    crosshair = picked.mark_rule(color=c["muted"], strokeWidth=1).encode(x=x)
+    crosshair_label = _haloed_text(
+        picked, dict(x=x, y=alt.value(0), text="Return label:N"),
+        align="center", baseline="bottom", dy=-4, fontSize=11, fontWeight="bold",
     )
+    on_lines = base.transform_filter(nearest)
+    hover_dots = on_lines.mark_point(
+        filled=True, size=70, opacity=1, stroke=c["surface"], strokeWidth=2,
+    ).encode(x=x, y=y, color=color)
+
+    def beside(series: str, dy: int) -> list:
+        """'Client ₹…' / 'House ₹…' beside that series' dot; flips to the
+        left of the dot in the right half so it never runs off the edge."""
+        pick = on_lines.transform_filter(alt.datum.Series == series)
+        out = []
+        for cond, align, dx in (
+            (alt.datum.Return <= mid, "left", 10),
+            (alt.datum.Return > mid, "right", -10),
+        ):
+            out += _haloed_text(
+                pick.transform_filter(cond), dict(x=x, y=y, text="Hover label:N"),
+                align=align, dx=dx, dy=dy, fontSize=12, fontWeight="bold",
+            )
+        return out
+
+    # Client label rides above its dot, house below: at a return of zero the
+    # two dots coincide, and this keeps the two readouts apart.
+    hover_labels = beside("Client return", -9) + beside("House earnings", 11)
 
     return alt.layer(
-        zero, hurdle_rule, hurdle_label, lines, hover, now_dots, now_label,
+        zero, hurdle_rule, hurdle_label, lines, selectors, crosshair,
+        *crosshair_label, hover_dots, *hover_labels, now_dots, *now_label,
     ).properties(height=280)
 
 

@@ -299,7 +299,7 @@ so swiping across a chart on a phone scrolls the page instead of the chart.
 | Phase 1 | **Yields vs hurdle** — gross return, client yield and house yield as bars against a dashed hurdle line | Gross return and net yield only |
 | Phase 2 | **Client capital over 5 years** — line with the start/end values labelled and payout years marked | Same, worded as "portfolio value" / "withdrawn" |
 | Phase 2 | **Yearly profit split** — client return + house earnings per year, with the cumulative CLTV line over the top | Net gain + performance fee (no fee segment in a sub-hurdle year); no CLTV |
-| Phase 1 | **How the year changes with the return** — client return and house earnings swept across a range of annual returns, hurdle marked, current year marked. House earnings are flat at zero up to the hurdle and rise beyond it; the client line is the full gross result up to the hurdle, then the hurdle plus its split — both kink at the hurdle. | Not shown (it plots house earnings) |
+| Phase 1 | **How the year changes with the return** — client return and house earnings swept across a range of annual returns, hurdle marked, current year marked. House earnings are flat at zero up to the hurdle and rise beyond it; the client line is the full gross result up to the hurdle, then the hurdle plus its split — both kink at the hurdle. Hovering or tapping anywhere snaps a crosshair to the nearest return and reads both lines at once: a dot on each with "Client ₹…" / "House ₹…" beside it, the return at the top, and a three-line tooltip. | Not shown (it plots house earnings) |
 | Phase 2 | **Capital bridge** — waterfall: start capital + net gains − payouts = final value. Exact, because house earnings never enter the client's capital. | Same, worded "withdrawn" |
 
 Phase 2 charts sit in a **Charts / Table** tab pair so the wide table is one
@@ -319,6 +319,11 @@ Mobile-first details worth keeping when editing `charts.py`:
   plain component bars because there is nothing being carved up.
 - Client-view charts are separate code paths that only ever receive client
   quantities — house earnings, house yield and CLTV cannot leak into them.
+- `show()` sets a spec-level `autosize: fit-x`. Streamlit's Vega theme uses
+  `fit`, under which a chart's `height` is the budget for the *whole* figure
+  and the axes eat into the plot — a three-bar chart ends up with its bars
+  overlapping. With `fit-x`, `height` means the plot area, as it does
+  offline.
 
 The three series colours were validated together as a colourblind-safe set
 against the white surface; brand navy itself is too dark and too grey to
