@@ -27,7 +27,7 @@ import pandas as pd
 # pyrefly: ignore [missing-import]
 import streamlit as st
 
-from engine import calculate_single_year, format_inr
+from engine import calculate_single_year, format_inr, simulate_five_years
 
 # Series colours, keyed to the Datavynx brand (navy primary, gold emphasis,
 # fixed light surface -- see .streamlit/config.toml). Brand navy itself is
@@ -722,3 +722,293 @@ def waterfall_chart(rows: list, client_view: bool) -> alt.LayerChart:
     ).encode(x=x, y="top:Q", text="Label:N")
 
     return alt.layer(bars, connectors, labels).properties(height=260)
+
+
+def _signed(value: float) -> str:
+    """+₹2.1L / −₹9.2L / ±₹0 -- a difference against the plan."""
+    if round(value, 2) == 0:
+        return "±₹0"
+    return ("+" if value > 0 else "−") + fmt_short(abs(value))
+
+
+def fee_rate_chart(rows: list, plan: list | None, client_view: bool) -> alt.LayerChart:
+    """Effective fee rate per year -- house earnings as a share of that year's
+    gross profit -- as gold bars, each against a navy tick for the headline
+    split, plus a darker "5-yr" bar for the whole projection.
+
+    This is not a table column, and it is the number that explains the
+    pricing: with a 12% hurdle and a 40% split, a 20% year costs 16% of the
+    gain, a 30% year 24%, a 12% year nothing. The gap between bar and tick
+    is what the hurdle gives the client. A loss or sub-hurdle year is drawn
+    as an explicit "No fee" at zero, not a missing bar. The 5-yr bar is fees
+    over the five-year gross net of losses. ``plan`` (the per-year grid
+    parameters) supplies the headline split; if an older snapshot lacks it,
+    the split is inferred from years that cleared the hurdle.
+    """
+    c = _colors()
+    fee_word = "Fee" if client_view else "House share"
+    data, headlines = [], []
+    total_gross = total_house = 0.0
+    for i, r in enumerate(rows):
+        gross = float(r["Gross Profit"])
+        house = float(r["House Earnings"])
+        rate = round(house / gross * 100, 2) if gross > 0 and house > 0 else 0.0
+        if plan and i < len(plan):
+            headline = float(plan[i]["fund_house_split"])
+        else:
+            remaining = float(r["Remaining Profit"])
+            headline = round(house / remaining * 100, 2) if remaining > 0 else None
+        headlines.append(headline)
+        total_gross += gross
+        total_house += house
+        data.append({
+            "Period": f"Yr {r['Year']}", "Rate": rate, "kind": "year",
+            "Label": f"{rate:.1f}%" if rate > 0 else "No fee",
+            "Headline": headline,
+            "Full": f"{fee_word} {format_inr(house)} on {format_inr(gross)} gross",
+        })
+    known = [h for h in headlines if h is not None]
+    constant = len(set(known)) == 1
+    overall = (
+        round(total_house / total_gross * 100, 2)
+        if total_gross > 0 and total_house > 0 else 0.0
+    )
+    data.append({
+        "Period": "5-yr", "Rate": overall, "kind": "overall",
+        "Label": f"{overall:.1f}%" if overall > 0 else "No fee",
+        "Headline": known[0] if constant else None,
+        "Full": f"{fee_word} {format_inr(total_house)} on {format_inr(total_gross)} gross",
+    })
+    df = pd.DataFrame(data)
+    order = [d["Period"] for d in data]
+    top = max([d["Rate"] for d in data] + known + [1.0]) * 1.3
+
+    x = alt.X("Period:N", sort=order, axis=alt.Axis(title=None, labelAngle=0, labelFontSize=12),
+              scale=alt.Scale(paddingInner=0.45))
+    y = alt.Y(
+        "Rate:Q",
+        scale=alt.Scale(domain=[0, top], nice=False),
+        axis=alt.Axis(title="% of gross", labelExpr="datum.label + '%'", tickCount=5),
+    )
+    base = alt.Chart(df)
+    bars = base.mark_bar(cornerRadiusEnd=3).encode(
+        x=x, y=y,
+        color=alt.Color(
+            "kind:N", scale=alt.Scale(domain=["year", "overall"],
+                                      range=[c["house"], c["house_dark"]]),
+            legend=None,
+        ),
+        tooltip=[alt.Tooltip("Period:N"), alt.Tooltip("Label:N", title="Effective rate"),
+                 alt.Tooltip("Full:N", title="Amount")],
+    )
+    # Headline split as a navy tick over each bar: bar = achieved, tick =
+    # the nominal figure in the agreement. The bar can never exceed it.
+    ticks = base.transform_filter("isValid(datum.Headline)").mark_tick(
+        color=c["ink"], thickness=2,
+    ).encode(
+        x=x, y="Headline:Q",
+        tooltip=[alt.Tooltip("Headline:Q", title="Headline split", format=".2f")],
+    )
+    tick_label_text = (
+        f"Headline split {known[0]:g}%" if constant and known else "Headline split"
+    )
+    tick_label = _haloed_text(
+        base.transform_filter(alt.datum.Period == order[0]),
+        dict(x=x, y="Headline:Q", text=alt.value(tick_label_text)),
+        align="left", baseline="bottom", dx=-14, dy=-5, fontSize=11,
+    ) if known else []
+    charged = base.transform_filter(alt.datum.Rate > 0).mark_text(
+        dy=-7, color=c["ink"], fontSize=12, fontWeight="bold",
+    ).encode(x=x, y=y, text="Label:N")
+    waived = base.transform_filter(alt.datum.Rate <= 0).mark_text(
+        dy=-7, color=c["muted"], fontSize=11,
+    ).encode(x=x, y=y, text="Label:N")
+    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
+        color=c["muted"], strokeWidth=1,
+    ).encode(y="y:Q")
+
+    return alt.layer(bars, zero, ticks, *tick_label, charged, waived).properties(height=260)
+
+
+SHOCK_RANGE = range(-20, 21)
+
+
+def shock_chart(plan: list, capital: float, client_view: bool) -> alt.LayerChart:
+    """The plan under a market shock: a slider adds Δ points to *every year's*
+    planned return, and the client's capital path (and, internally, the
+    cumulative house earnings) redraws instantly against the plan's ghost.
+
+    Every scenario is a real run of ``simulate_five_years`` on the grid's own
+    per-year parameters -- payouts, hurdles and splits included -- computed
+    once here for each Δ, so at Δ = 0 the chart matches the table to the
+    paisa, and the slider is pure Vega (no rerun; works on a phone).
+
+    What it shows that the table cannot: the whole neighbourhood of plans,
+    and the asymmetry the hurdle creates -- a −5 pt shock costs the house
+    proportionally far more CLTV than a +5 pt shock gains it, and years that
+    drop below the hurdle are tagged "no fee" as the house line goes flat.
+    """
+    c = _colors()
+    plan_word = "the plan"
+
+    # ---- one simulation per shock -------------------------------------
+    scenarios = {}
+    for d in SHOCK_RANGE:
+        params = [dict(p, annual_return=p["annual_return"] + d) for p in plan]
+        srows, _ = simulate_five_years(capital, params)
+        path = [{"Period": "Start", "Capital": capital, "Cum": 0.0, "Miss": False}]
+        cum = 0.0
+        for r in srows:
+            cum = round(cum + r["House Earnings"], 2)
+            path.append({
+                "Period": f"Yr {r['Year']}", "Capital": r["Ending Capital"],
+                "Cum": cum, "Miss": r["House Earnings"] <= 0,
+            })
+        scenarios[d] = path
+    plan_path = scenarios[0]
+    periods = [p["Period"] for p in plan_path]
+    half = {p: ("left" if i < len(periods) / 2 else "right") for i, p in enumerate(periods)}
+
+    values = [p["Capital"] for path in scenarios.values() for p in path]
+    if not client_view:
+        values += [p["Cum"] for path in scenarios.values() for p in path]
+    divisor, unit_title = pick_unit(values)
+    top = max(values) / divisor
+    lo = min(0.0, min(values) / divisor)
+
+    client_series = "Portfolio value" if client_view else "Client capital"
+    house_series = "House earnings (cumulative)"
+    long_rows, wide_rows, scen_rows = [], [], []
+    for d, path in scenarios.items():
+        end = path[-1]
+        d_cap = end["Capital"] - plan_path[-1]["Capital"]
+        d_cum = end["Cum"] - plan_path[-1]["Cum"]
+        for i, p in enumerate(path):
+            is_end = i == len(path) - 1
+            common = {"Shock": d, "Period": p["Period"], "Half": half[p["Period"]]}
+            long_rows.append({
+                **common, "Series": client_series,
+                "Value": p["Capital"] / divisor, "Full": format_inr(p["Capital"]),
+                "Hover label": fmt_short(p["Capital"]),
+                "End label": (
+                    f"{fmt_short(end['Capital'])} ({_signed(d_cap)} vs {plan_word})"
+                    if d else f"{fmt_short(end['Capital'])} as planned"
+                ) if is_end else "",
+                "Miss": False,
+            })
+            if not client_view:
+                long_rows.append({
+                    **common, "Series": house_series,
+                    "Value": p["Cum"] / divisor, "Full": format_inr(p["Cum"]),
+                    "Hover label": fmt_short(p["Cum"]),
+                    "End label": (
+                        f"CLTV {fmt_short(end['Cum'])} ({_signed(d_cum)})"
+                        if d else f"CLTV {fmt_short(end['Cum'])} as planned"
+                    ) if is_end else "",
+                    "Miss": p["Miss"],
+                })
+            wide_rows.append({
+                **common,
+                client_series: format_inr(p["Capital"]),
+                "Plan " + client_series.lower(): format_inr(plan_path[i]["Capital"]),
+                house_series: format_inr(p["Cum"]),
+                "Plan house earnings": format_inr(plan_path[i]["Cum"]),
+            })
+        scen_rows.append({
+            "Shock": d,
+            "Scenario": (
+                "As entered in the plan" if d == 0 else
+                f"Every year {'+' if d > 0 else '−'}{abs(d)} pts vs {plan_word}"
+            ),
+        })
+    df = pd.DataFrame(long_rows)
+    wide = pd.DataFrame(wide_rows)
+    scen_df = pd.DataFrame(scen_rows)
+
+    # ---- the slider ----------------------------------------------------
+    shock = alt.param(
+        name="shock", value=0,
+        bind=alt.binding_range(
+            min=SHOCK_RANGE.start, max=SHOCK_RANGE.stop - 1, step=1,
+            name=("If every year's return differs from the plan by (pts)  "
+                  if client_view else "Shock to every year's return (pts)  "),
+        ),
+    )
+    live = alt.datum.Shock == shock
+
+    x = alt.X("Period:N", sort=periods,
+              axis=alt.Axis(title=None, labelAngle=0, labelFontSize=12))
+    y = alt.Y(
+        "Value:Q",
+        scale=alt.Scale(domain=[lo, top * 1.14], nice=False),
+        axis=alt.Axis(title=unit_title, format=",.2~f"),
+    )
+    series_domain = [client_series] + ([] if client_view else [house_series])
+    series_range = [c["client"]] + ([] if client_view else [c["house_dark"]])
+    color = alt.Color(
+        "Series:N",
+        scale=alt.Scale(domain=series_domain, range=series_range),
+        legend=None if client_view else alt.Legend(
+            orient="top", direction="horizontal", title=None,
+            symbolType="stroke", symbolStrokeWidth=3, labelFontSize=12,
+        ),
+    )
+    base = alt.Chart(df)
+    plan_lines = base.transform_filter(alt.datum.Shock == 0).mark_line(
+        strokeWidth=2, strokeDash=[5, 4], opacity=0.45,
+    ).encode(x=x, y=y, color=color).add_params(shock)
+    live_base = base.transform_filter(live)
+    live_lines = live_base.mark_line(strokeWidth=2.5).encode(x=x, y=y, color=color)
+    live_points = live_base.mark_point(
+        filled=True, size=45, opacity=1, stroke=c["surface"], strokeWidth=1.5,
+    ).encode(x=x, y=y, color=color)
+    ends = live_base.transform_filter(alt.datum["End label"] != "")
+    end_props = dict(align="right", baseline="bottom", dx=6, fontSize=12, fontWeight="bold")
+    # When the last year itself is a no-fee year its tag sits where the
+    # house end label would go, so that label moves up a line.
+    end_labels = _haloed_text(
+        ends.transform_filter(alt.datum.Miss == False), dict(x=x, y=y, text="End label:N"),  # noqa: E712
+        dy=-10, **end_props,
+    ) + _haloed_text(
+        ends.transform_filter(alt.datum.Miss), dict(x=x, y=y, text="End label:N"),
+        dy=-24, **end_props,
+    )
+    # A year the house earned nothing under this shock: the cumulative line
+    # goes flat, and says why. Above the point -- below it would sit on the
+    # axis labels, since a flat house line runs along the baseline.
+    miss_tags = live_base.transform_filter(alt.datum.Miss).mark_text(
+        baseline="bottom", dy=-8, fontSize=10, color=c["muted"],
+    ).encode(x=x, y=y, text=alt.value("no fee"))
+    scenario_text = alt.Chart(scen_df).transform_filter(live).mark_text(
+        align="left", baseline="top", dx=2, dy=4, fontSize=11, color=c["muted"],
+    ).encode(x=alt.value(0), y=alt.value(0), text="Scenario:N")
+
+    # ---- hover: crosshair on the year, dots and values on the live lines --
+    nearest = alt.selection_point(
+        nearest=True, on="pointerover", fields=["Period"], empty=False,
+    )
+    tooltip = [alt.Tooltip("Period:N"), alt.Tooltip(f"{client_series}:N"),
+               alt.Tooltip(f"Plan {client_series.lower()}:N")]
+    if not client_view:
+        tooltip += [alt.Tooltip(f"{house_series}:N"), alt.Tooltip("Plan house earnings:N")]
+    wide_live = alt.Chart(wide).transform_filter(live)
+    selectors = wide_live.mark_point(opacity=0).encode(x=x, tooltip=tooltip).add_params(nearest)
+    crosshair = wide_live.transform_filter(nearest).mark_rule(
+        color=c["muted"], strokeWidth=1,
+    ).encode(x=x)
+    on_lines = live_base.transform_filter(nearest)
+    hover_dots = on_lines.mark_point(
+        filled=True, size=80, opacity=1, stroke=c["surface"], strokeWidth=2,
+    ).encode(x=x, y=y, color=color)
+    hover_labels = []
+    for side, align, dx in (("left", "left", 10), ("right", "right", -10)):
+        hover_labels += _haloed_text(
+            on_lines.transform_filter(alt.datum.Half == side),
+            dict(x=x, y=y, text="Hover label:N"),
+            align=align, dx=dx, fontSize=12, fontWeight="bold",
+        )
+
+    return alt.layer(
+        plan_lines, live_lines, live_points, selectors, crosshair, *end_labels,
+        miss_tags, scenario_text, hover_dots, *hover_labels,
+    ).properties(height=300)

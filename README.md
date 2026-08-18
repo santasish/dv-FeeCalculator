@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/tests-41%20passing-CBA135?style=flat-square" alt="tests">
   <img src="https://img.shields.io/badge/python-3.14-0A1424?style=flat-square" alt="python">
   <img src="https://img.shields.io/badge/streamlit-1.61-0A1424?style=flat-square" alt="streamlit">
-  <img src="https://img.shields.io/badge/charts-6%20Altair-CBA135?style=flat-square" alt="charts">
+  <img src="https://img.shields.io/badge/charts-8%20Altair-CBA135?style=flat-square" alt="charts">
   <img src="https://img.shields.io/badge/internal%20use-only-C0392B?style=flat-square" alt="internal use only">
 </p>
 
@@ -18,9 +18,10 @@ hurdle-rate-plus-profit-share arrangement.
 - **Phase 1** — single-year calculation with a full formula audit trail.
 - **Phase 2** — five-year compounding projection with per-year rate overrides,
   payouts, and a Client Lifetime Value figure.
-- **Charts** — six Altair charts alongside the tables (profit allocation,
+- **Charts** — eight Altair charts alongside the tables (profit allocation,
   yields vs hurdle, sensitivity, capital over time, yearly split with CLTV,
-  capital waterfall), sized to read on a phone as well as a desktop.
+  capital waterfall, effective fee rate, and a slider-driven market-shock
+  explorer), sized to read on a phone as well as a desktop.
 - **Client view** — a toggle that presents the same numbers from the client's
   side, withholding fund house earnings, house yield and CLTV.
 
@@ -53,7 +54,7 @@ Tested against Python 3.14, Streamlit 1.61.1, pandas 3.0.5.
 |---|---|
 | `engine.py` | All calculation logic. **No Streamlit import** — importable and testable on its own. |
 | `app.py` | Everything UI: views, renderers, the projection grid, the input formatter. |
-| `charts.py` | The Altair charts (Phase 1 allocation, yield and sensitivity charts; Phase 2 capital, profit-split and waterfall charts), built from the engine's own result dicts. |
+| `charts.py` | The Altair charts (Phase 1 allocation, yield and sensitivity charts; Phase 2 capital, profit-split, waterfall, fee-rate and market-shock charts), built from the engine's own result dicts. |
 | `test_engine.py` | 41 tests covering the maths and its edge cases. |
 | `assets/` | Datavynx brand marks used by the app and this README. |
 | `.streamlit/config.toml` | Brand theme (navy text, gold accent). |
@@ -322,10 +323,15 @@ so swiping across a chart on a phone scrolls the page instead of the chart.
 | Phase 2 | **Client capital over 5 years** — line with the start/end values labelled and payout years marked | Same, worded as "portfolio value" / "withdrawn" |
 | Phase 2 | **Yearly profit split** — client return + house earnings per year, with the cumulative CLTV line over the top | Net gain + performance fee (no fee segment in a sub-hurdle year); no CLTV |
 | Phase 2 | **Capital bridge** — waterfall: start capital + net gains − payouts = final value. Exact, because house earnings never enter the client's capital. | Same, worded "withdrawn" |
+| Phase 2 | **Effective fee rate vs headline split** — per year, house earnings as a share of that year's gross profit (a gold bar) against the headline split (a navy tick), plus a darker "5-yr" bar for the whole projection. Not a table column; it is the number that explains the pricing — with a 12 % hurdle and 40 % split, a 20 % year costs 16 % of the gain, a 12 % year nothing. Loss / sub-hurdle years read "No fee" at zero. | Same, worded "Fee as a share of each year's gross gain" |
+| Phase 2 | **The plan under a market shock** — a slider (rendered by Vega, no rerun) adds Δ points, −20 to +20, to *every year's* planned return; the client-capital path and the cumulative house earnings redraw instantly against dashed ghosts of the plan. Each Δ is a real run of `simulate_five_years` on the grid's own parameters, so Δ = 0 matches the table exactly. End labels state the difference vs plan; years the house earns nothing are tagged "no fee"; hover reads any year. Shows the asymmetry the hurdle creates: a −5 pt shock costs the client ~12 % of final capital but the house ~65 % of CLTV. | Portfolio line only, worded "If markets do better or worse than assumed" |
 
 Phase 2 charts sit in a **Charts / Table** tab pair so the wide table is one
-tap away rather than the first thing a phone shows. Chart pairs use
-`st.columns(2)`, which Streamlit stacks automatically below ~640 px.
+tap away rather than the first thing a phone shows. They are laid out as a
+2×2 grid — path (capital, yearly split) over end-state and pricing (bridge,
+fee rate) — with the shock explorer full width beneath, since it is the one
+what-if view and its slider needs the room. Chart pairs use `st.columns(2)`,
+which Streamlit stacks automatically below ~640 px.
 
 Mobile-first details worth keeping when editing `charts.py`:
 
@@ -340,6 +346,10 @@ Mobile-first details worth keeping when editing `charts.py`:
   plain component bars because there is nothing being carved up.
 - Client-view charts are separate code paths that only ever receive client
   quantities — house earnings, house yield and CLTV cannot leak into them.
+- The shock explorer's slider is a Vega `binding_range` param: every
+  scenario is precomputed in Python and the slider only filters, so dragging
+  it never triggers a Streamlit rerun and it works with a thumb. Its label
+  and range input are styled by the `.vega-bindings` rules in `_BRAND_CSS`.
 - `show()` sets a spec-level `autosize: fit-x`. Streamlit's Vega theme uses
   `fit`, under which a chart's `height` is the budget for the *whole* figure
   and the axes eat into the plot — a three-bar chart ends up with its bars

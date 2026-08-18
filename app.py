@@ -4,7 +4,9 @@ from pathlib import Path
 from charts import (
     allocation_chart,
     capital_chart,
+    fee_rate_chart,
     sensitivity_chart,
+    shock_chart,
     show as show_chart,
     waterfall_chart,
     yearly_split_chart,
@@ -69,6 +71,28 @@ _BRAND_CSS = f"""
       padding-top: 0.75rem;
   }}
   [data-testid="stMetricValue"] {{ color: {BRAND_NAVY}; }}
+  /* The slider Vega renders under the market-shock chart: brand it like
+     the rest of the controls instead of the browser default. */
+  .vega-bindings {{
+      color: {BRAND_MUTED};
+      font-size: 0.82rem;
+      margin-top: 0.15rem;
+  }}
+  .vega-bindings label {{ display: flex; align-items: center; gap: 0.5rem; }}
+  .vega-bindings input[type="range"] {{
+      accent-color: {BRAND_GOLD};
+      flex: 1 1 auto;
+      max-width: 22rem;
+      min-width: 8rem;
+  }}
+  .vega-bindings .vega-bind-name {{ color: {BRAND_NAVY}; font-weight: 600; }}
+  .vega-bindings label span:last-child {{
+      color: {BRAND_NAVY};
+      font-weight: 600;
+      min-width: 2.2rem;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+  }}
 </style>
 """
 st.markdown(_BRAND_CSS, unsafe_allow_html=True)
@@ -412,11 +436,20 @@ def render_phase1_charts(rates: dict, results: dict, client_view: bool):
         show_chart(sensitivity_chart(rates))
 
 
-def render_projection_charts(rows: list, client_view: bool):
-    """The projection charts: two side by side, then the capital bridge.
+def render_projection_charts(snapshot: dict, client_view: bool):
+    """The projection charts: a 2×2 grid, then the market-shock explorer.
 
-    Columns stack on a phone, so this reads as one column there.
+    Row 1 is the path (capital over time, yearly split); row 2 is the
+    end-state (capital bridge) and the pricing (effective fee rate). The
+    shock explorer sits full width beneath: it is the only what-if view, and
+    its slider needs the horizontal room. Columns stack on a phone.
     """
+    rows = snapshot["projection_rows"]
+    # Snapshots stored before the grid parameters were kept lack this key;
+    # the charts that need it degrade (fee chart infers the split, shock
+    # chart is skipped) rather than raise.
+    plan = snapshot.get("yearly_params")
+
     left, right = st.columns(2)
     with left:
         st.markdown(
@@ -431,15 +464,37 @@ def render_projection_charts(rows: list, client_view: bool):
         )
         show_chart(yearly_split_chart(rows, client_view))
 
-    # Half width on desktop: with only three or four bars a full-width
-    # waterfall spreads them too far apart to read as one bridge.
-    bridge, _ = st.columns(2)
-    with bridge:
+    left, right = st.columns(2)
+    with left:
         st.markdown(
             "**From starting capital to final value**" if client_view
             else "**Capital bridge: start to final**"
         )
         show_chart(waterfall_chart(rows, client_view))
+    with right:
+        st.markdown(
+            "**Fee as a share of each year's gross gain**" if client_view
+            else "**Effective fee rate vs headline split**"
+        )
+        show_chart(fee_rate_chart(rows, plan, client_view))
+
+    if plan:
+        st.markdown(
+            "**If markets do better or worse than assumed**" if client_view
+            else "**The plan under a market shock**"
+        )
+        st.caption(
+            "Drag the slider to add or subtract the same number of points from "
+            "every year's return. Solid line: that scenario; dashed: the plan "
+            "as entered. Hurdle, split and withdrawals stay as in the grid."
+            if client_view else
+            "Drag the slider to add or subtract the same number of points from "
+            "every year's return; hurdles, splits and payouts stay as in the "
+            "grid. Solid: that scenario; dashed: the plan. Years the house "
+            "earns nothing are tagged, so the asymmetry the hurdle creates is "
+            "visible: a shortfall costs CLTV faster than an upside adds to it."
+        )
+        show_chart(shock_chart(plan, float(snapshot["rates"]["capital"]), client_view))
 
 
 def _audit_steps_3_to_6(results: dict, client_split, fund_house_split) -> str:
@@ -573,7 +628,7 @@ def render_projection(snapshot: dict):
     # horizontal scroll, so it should not be what greets the reader.
     charts_tab, table_tab = st.tabs(["Charts", "Table"])
     with charts_tab:
-        render_projection_charts(rows, client_view=False)
+        render_projection_charts(snapshot, client_view=False)
 
     # A totals row for the flow columns only -- point-in-time
     # columns (capital, yields) have no meaningful 5-year sum
@@ -739,7 +794,7 @@ def render_projection_client(snapshot: dict):
 
     charts_tab, table_tab = st.tabs(["Charts", "Table"])
     with charts_tab:
-        render_projection_charts(rows, client_view=True)
+        render_projection_charts(snapshot, client_view=True)
 
     fee_waived_years = [
         year for year, value in df["House Earnings"].items() if value <= 0
@@ -1074,6 +1129,9 @@ def main():
                 rows, payout_warnings = simulate_five_years(capital_employed, yearly_params)
                 snapshot["projection_rows"] = rows
                 snapshot["payout_warnings"] = payout_warnings
+                # Kept for the charts that re-run the plan (the shock explorer)
+                # or need the headline split (the fee-rate chart).
+                snapshot["yearly_params"] = yearly_params
 
                 # Phase 1 IS year 1 of the projection. Deriving it from the same
                 # parameters means the two sections can never contradict each
