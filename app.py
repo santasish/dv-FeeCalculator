@@ -101,12 +101,21 @@ _BRAND_CSS = f"""
      measures what the charts actually get. Scoped to two-column blocks
      that hold a chart, so metric pairs stay side by side. */
   [data-testid="stMainBlockContainer"] {{ container-type: inline-size; }}
+  /* The five-year allocation chart is compact; beside the capital bridge
+     it is centred in a box the bridge's height so the row reads as a
+     matched pair. The min-height is dropped when the pair stacks, so a
+     phone gets no blank band around it. */
+  .st-key-alloc_5yr {{
+      min-height: 307px;
+      justify-content: center;
+  }}
   @container (max-width: 600px) {{
       [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(2):last-child):has([data-testid="stVegaLiteChart"])
       > [data-testid="stColumn"] {{
           flex: 1 1 100% !important;
           min-width: 100% !important;
       }}
+      .st-key-alloc_5yr {{ min-height: 0; }}
   }}
 </style>
 """
@@ -490,11 +499,15 @@ def render_projection_charts(snapshot: dict, client_view: bool):
             "**Where your 5-year gain went**" if client_view
             else "**Five-year allocation**"
         )
-        chart = allocation_5yr_chart(rows, client_view)
-        if chart is not None:
-            show_chart(chart)
-        else:
-            st.caption("No profit to allocate across the plan.")
+        # Keyed so _BRAND_CSS can centre this compact chart in a box the
+        # height of the bridge beside it -- but only while the two share a
+        # row. Stacked on a phone it sits at its natural height.
+        with st.container(key="alloc_5yr"):
+            chart = allocation_5yr_chart(rows, client_view)
+            if chart is not None:
+                show_chart(chart)
+            else:
+                st.caption("No profit to allocate across the plan.")
 
     if plan:
         st.markdown(

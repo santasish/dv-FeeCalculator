@@ -734,8 +734,14 @@ def waterfall_chart(rows: list, client_view: bool) -> alt.LayerChart:
     return alt.layer(bars, connectors, labels).properties(height=260)
 
 
-# Matches waterfall_chart's height: the two sit side by side in the grid.
-_ALLOC_5YR_HEIGHT = 260
+# Compact: the bar, the total label above it, and a little air -- roughly
+# the tightest that keeps the label off the top edge (bar/2 + label offset
+# + line height). The chart is *not* sized to match the capital bridge
+# beside it: app.py's CSS centres it in a bridge-height box when the two
+# share a row, and lets it sit at its natural height when the pair stacks
+# on a phone. Sizing the canvas to the bridge instead left ~90px of blank
+# band above and below the bar in a single column.
+_ALLOC_5YR_HEIGHT = 132
 
 
 def allocation_5yr_chart(rows: list, client_view: bool) -> alt.LayerChart | None:
@@ -757,11 +763,11 @@ def allocation_5yr_chart(rows: list, client_view: bool) -> alt.LayerChart | None
     the same plain component bars Phase 1 uses for a single such year,
     applied to the 5-year totals net of the bad year.
 
-    Both branches fill a canvas matched to the capital bridge beside them in
-    the grid (``_ALLOC_5YR_HEIGHT``) and centre their content vertically --
-    Phase 1's version of this chart is a thin ribbon under its own metrics,
-    but pinned to the top of a much taller grid cell it read as a stray
-    sliver rather than a chart the bridge sits beside.
+    Both branches draw at a compact height (``_ALLOC_5YR_HEIGHT``) with the
+    bar thicker than Phase 1's ribbon and a total label above it. Vertical
+    placement in the 2x2 grid is the app's job (see the ``alloc_5yr``
+    keyed container and its CSS in ``app.py``): centred in a bridge-height
+    box beside the capital bridge, natural height when stacked on a phone.
     """
     c = _colors()
     total_gross = round(sum(float(r["Gross Profit"]) for r in rows), 2)
@@ -774,7 +780,7 @@ def allocation_5yr_chart(rows: list, client_view: bool) -> alt.LayerChart | None
             "gross_profit": total_gross,
             "total_client_return": total_client_return,
             "total_fund_house_earnings": total_house,
-        }, client_view, height=_ALLOC_5YR_HEIGHT, bar_height=36)
+        }, client_view, height=_ALLOC_5YR_HEIGHT - 20, bar_height=28)
 
     if client_view:
         segments = [

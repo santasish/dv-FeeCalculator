@@ -330,9 +330,13 @@ Phase 2 charts sit in a **Charts / Table** tab pair so the wide table is one
 tap away rather than the first thing a phone shows. They are laid out as a
 2×2 grid — path (capital, yearly split) over end-state (bridge, five-year
 allocation) — with the shock explorer full width beneath, since it is the
-one what-if view and its slider needs the room. The allocation bar draws on
-a canvas the same height as the bridge, centred, so the row reads as a
-matched pair rather than a chart beside a sliver.
+one what-if view and its slider needs the room. The allocation bar is drawn
+compact and centred by CSS in a bridge-height box (the `alloc_5yr` keyed
+container), so the row reads as a matched pair on desktop — and the
+min-height is dropped when the pair stacks, so a phone gets the bar at its
+natural height instead of a blank band around it. Sizing the Vega canvas
+itself to the bridge is the obvious alternative and is wrong: the canvas
+follows the chart everywhere, blank space included.
 
 Chart pairs use `st.columns(2)`. Streamlit only stacks columns below a
 640 px *viewport*, which left an iPad in portrait with the sidebar open
