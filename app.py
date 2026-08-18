@@ -93,6 +93,21 @@ _BRAND_CSS = f"""
       text-align: right;
       font-variant-numeric: tabular-nums;
   }}
+  /* Chart pairs stack when the *content area* is narrow, not just the
+     viewport. Streamlit only stacks st.columns below a 640px viewport, so
+     an iPad in portrait with the sidebar open (768px viewport, ~430px of
+     content) still got two 205px-wide charts: clipped labels, truncated
+     legends, dropped axis ticks. A container query on the main block
+     measures what the charts actually get. Scoped to two-column blocks
+     that hold a chart, so metric pairs stay side by side. */
+  [data-testid="stMainBlockContainer"] {{ container-type: inline-size; }}
+  @container (max-width: 600px) {{
+      [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(2):last-child):has([data-testid="stVegaLiteChart"])
+      > [data-testid="stColumn"] {{
+          flex: 1 1 100% !important;
+          min-width: 100% !important;
+      }}
+  }}
 </style>
 """
 st.markdown(_BRAND_CSS, unsafe_allow_html=True)

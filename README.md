@@ -330,8 +330,19 @@ Phase 2 charts sit in a **Charts / Table** tab pair so the wide table is one
 tap away rather than the first thing a phone shows. They are laid out as a
 2×2 grid — path (capital, yearly split) over end-state (bridge, five-year
 allocation) — with the shock explorer full width beneath, since it is the
-one what-if view and its slider needs the room. Chart pairs use
-`st.columns(2)`, which Streamlit stacks automatically below ~640 px.
+one what-if view and its slider needs the room. The allocation bar draws on
+a canvas the same height as the bridge, centred, so the row reads as a
+matched pair rather than a chart beside a sliver.
+
+Chart pairs use `st.columns(2)`. Streamlit only stacks columns below a
+640 px *viewport*, which left an iPad in portrait with the sidebar open
+(768 px viewport, ~430 px of content) drawing two 205 px charts — clipped
+labels, truncated legends, dropped axis ticks. `_BRAND_CSS` therefore adds
+a container query on the main block: any two-column block that holds a
+chart stacks when the *content area* is under 600 px. In practice: phone
+and iPad portrait stack; iPad landscape stacks while the sidebar is open
+and shows the 2×2 once it is collapsed; desktop is always 2×2. Metric
+pairs are excluded and stay side by side.
 
 An earlier version of the fourth chart was a per-year "effective fee rate vs
 headline split" — house earnings ÷ that year's gross, against the headline
